@@ -5,12 +5,16 @@
   "version": "1.0.0",
   "author": "Emiliano Morgia",
   "license": "MIT",
-  "description": "Icon-only launcher for Cycle (Rust). Left click opens Cycle, right click applies the current slot now.",
-  "kinds": ["bar-widget"],
-  "entryPoints": { "barWidget": "Widget.qml" },
+  "description": "Brightness, theme, and wallpaper that follow the sun on Omarchy, written in Rust and learning from your manual brightness corrections.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
   "barWidget": {
     "displayName": "Cycle",
-    "description": "Open Cycle; right click applies the current slot now",
+    "description": "Open Cycle from the bar; right-click applies the current slot.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "center"
