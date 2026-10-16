@@ -69,6 +69,20 @@ Other subcommands: `tick [--force]`, `apply-now`, `resolve`, `state`, `apply-pre
 `engine on|off`, `engine-is-on`, `theme-gen [--force] [--apply]`, `test-gen`, `live` (print live data), `prompt` (print the prompt without generating).
 `generate --prompt ID`, `schedules`, `prompts list|sync-menu`, `open --prompt ID`, `expand TEXT`.
 
+
+## Fresh install: what to expect
+Cycle starts after `./install.sh`, but **generates nothing until you configure it**.
+
+- **Automatic Cycle is off.** Turn it on in the **Now** tab. The engine timer (`cycle-engine.timer`) is only enabled by `install.sh` when the engine is already on; otherwise enable it with `cycle engine on` (or the Now tab toggle).
+- **The styles folder is empty.** `~/.config/omarchy/cycle/styles` ships with no prompt files, so there are no prompts and no schedules until you create one in the **Prompt** tab.
+- **Location defaults to Dubai** (fixed in settings until you change it).
+- **Generation window** defaults to **06:00–18:00** (dawn–dusk style scheduling once a prompt has a schedule).
+- **Default RSS feed:** Google News Dubai. **Open-Meteo** needs no API key.
+- **Without a working generator command** (see below), generation fails and the **current wallpaper is kept**.
+- **Bar widget** (`emiliano.cycle`) is installed manually — see [Install the bar widget](#install-the-bar-widget) above.
+
+Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
+
 ## Prompts (Prompt tab)
 Prompts are text files `~/.config/omarchy/cycle/styles/<id>.txt` (titles in `settings.prompt_titles`, the active one in `styles/active`).
 Each prompt is a card in the Prompt tab with a title, id, full editor, slash autocomplete, inline errors (red underline),
@@ -123,6 +137,41 @@ supports its built-in providers. `cycle prompts list [--titles]`.
 
 The image command is `generator.command` in settings (default `grok -p {prompt_q} --always-approve --output-format json`) with
 `generator.timeout` (default and minimum 1200 s). If generation fails or times out, the current wallpaper is kept.
+
+
+## Generator command
+In the Cycle app, open the **Settings** tab and scroll to the bottom. The last section is **Generation**. It has three fields:
+
+| Field | What it is |
+|---|---|
+| **Prompt template** | Text used when building the image prompt |
+| **Generator command** | Shell command Cycle runs to produce the wallpaper PNG |
+| **Generator timeout (s)** | Timeout for that command (seconds) |
+
+The same values are stored in `~/.config/omarchy/cycle/settings.json` under `generator.command`, `generator.timeout`, and the prompt template fields.
+
+### How Cycle runs the command
+Cycle runs the generator command itself with `bash -c`. Before running it, Cycle substitutes placeholders in the command string:
+
+| Placeholder | Meaning |
+|---|---|
+| `{prompt_q}` | The full prompt, **shell-quoted** (safe to pass as one argument) |
+| `{prompt}` | The full prompt, **raw** (unquoted) |
+| `{out}` | Absolute path of the target PNG file Cycle expects |
+
+The command **must write a PNG** at `{out}`. Cycle then uses that file as the Cycle theme wallpaper (and archives a copy under `~/Pictures/desktop/`).
+
+### Default (Grok CLI)
+The default `generator.command` is pre-filled as:
+
+```sh
+grok -p {prompt_q} --always-approve --output-format json
+```
+
+That is the [Grok CLI](https://github.com/xai-org/grok-cli) only as a **default string**. Cycle does **not** install or log you into Grok. On a fresh machine you must install the Grok CLI separately and complete its login before generation works. Any other command that saves a PNG to `{out}` is a valid replacement (another image CLI, a local script, a curl wrapper, etc.).
+
+### Timeout and failure
+The effective timeout is at least **1200 seconds**: the code uses `max(timeout, 1200)`. If generation fails or times out, Cycle **keeps the current wallpaper**, applies nothing from that run, and shows a **desktop notification**.
 
 ## Day phases (no fixed clock hours)
 Boundaries are recomputed every day from the NOAA sun model for the configured location (`core::sun_events`):
