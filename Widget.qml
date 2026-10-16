@@ -7,7 +7,7 @@ import qs.Ui
 // commands are exec'd directly (no shell).
 BarWidget {
   id: root
-  moduleName: "emiliano.cycle"
+  moduleName: "emrgim.cycle"
 
   readonly property string cycleBin: Quickshell.env("HOME") + "/.local/bin/cycle"
 

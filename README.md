@@ -58,8 +58,8 @@ Make sure `~/.local/bin` is on your `PATH`.
 
 Install the bar widget (optional):
 ```sh
-mkdir -p ~/.config/omarchy/plugins/emiliano.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emiliano.cycle/
-# add {"id": "emiliano.cycle"} to the "center" section of ~/.config/omarchy/shell.json, then restart the shell
+mkdir -p ~/.config/omarchy/plugins/emrgim.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emrgim.cycle/
+# add {"id": "emrgim.cycle"} to the "center" section of ~/.config/omarchy/shell.json, then restart the shell
 ```
 
 ## First-run quickstart
@@ -114,7 +114,7 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
 
 ## Omarchy integration: agents and the bar
 - The Omarchy bar on SuperOmi has an **agents icon** (the "My Agents" panel with usage and limits for the AI coding agents). Cycle sits next to it as a peer.
-- Cycle has its own bar widget, `emiliano.cycle` (an Omarchy quickshell plugin, see `manifest.json` and `Widget.qml` in the repo root), placed in the **center of the bar**. It is an icon-only button drawn with the same `BarIconButton` style as the agents icon.
+- Cycle has its own bar widget, `emrgim.cycle` (an Omarchy quickshell plugin, see `manifest.json` and `Widget.qml` in the repo root), placed in the **center of the bar**. It is an icon-only button drawn with the same `BarIconButton` style as the agents icon.
   - **Left click** opens the Cycle app (`cycle app`).
   - **Right click** triggers Cycle right away (`cycle apply-now`): it applies the current slot immediately.
 - Because Cycle is a plain CLI (`cycle tick`, `cycle state`, `cycle profile`, `cycle apply-now`, …) with JSON output, agents running on the machine can read its state or trigger it from the shell.
@@ -122,8 +122,8 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
 
 ### Install the bar widget
 ```sh
-mkdir -p ~/.config/omarchy/plugins/emiliano.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emiliano.cycle/
-# then add {"id": "emiliano.cycle"} to the "center" section of ~/.config/omarchy/shell.json and restart the shell
+mkdir -p ~/.config/omarchy/plugins/emrgim.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emrgim.cycle/
+# then add {"id": "emrgim.cycle"} to the "center" section of ~/.config/omarchy/shell.json and restart the shell
 ```
 
 ## How it works
@@ -173,7 +173,7 @@ Cycle starts after `./install.sh`, but **generates nothing until you configure i
 - **Generation window** defaults to **06:00–18:00** (dawn–dusk style scheduling once a prompt has a schedule).
 - **Default RSS feed:** Google News Dubai. **Open-Meteo** needs no API key.
 - **Without a working generator command** (see below), generation fails and the **current wallpaper is kept**.
-- **Bar widget** (`emiliano.cycle`) is installed manually — see [Install the bar widget](#install-the-bar-widget) above.
+- **Bar widget** (`emrgim.cycle`) is installed manually — see [Install the bar widget](#install-the-bar-widget) above.
 
 Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
 
@@ -294,7 +294,7 @@ systemctl --user disable --now cycle-engine.timer
 rm -f ~/.config/systemd/user/cycle-engine.{service,timer} ~/.config/systemd/user/cycle-generate-now.service
 systemctl --user daemon-reload
 rm -f ~/.local/bin/cycle ~/.local/share/applications/cycle.desktop
-rm -rf ~/.config/omarchy/plugins/emiliano.cycle    # and remove its entry from ~/.config/omarchy/shell.json
+rm -rf ~/.config/omarchy/plugins/emrgim.cycle    # and remove its entry from ~/.config/omarchy/shell.json
 # optional, removes all settings, prompts, logs and generated images:
 rm -rf ~/.config/omarchy/cycle ~/.local/state/cycle ~/.local/share/cycle ~/.config/omarchy/themes/cycle
 ```
