@@ -171,6 +171,15 @@ pub fn run(mut c: Command, timeout: u64) -> Out {
 pub fn sh(cmd: &str, timeout: u64) -> Out { let mut c = Command::new("bash"); c.arg("-c").arg(cmd); run(c, timeout) }
 pub fn shv(args: &[&str], timeout: u64) -> Out { let mut c = Command::new(args[0]); c.args(&args[1..]); run(c, timeout) }
 pub fn quote(s: &str) -> String { format!("'{}'", s.replace('\'', "'\\''")) }
+/// Run a shell command with extra environment variables (values never become shell syntax).
+pub fn sh_env(cmd: &str, env: &[(&str, &str)], timeout: u64) -> Out { let mut c = Command::new("bash"); c.arg("-c").arg(cmd); for (k, v) in env { c.env(k, v); } run(c, timeout) }
+/// Single-pass placeholder substitution for the generator command. Placeholders become references to
+/// environment variables ("$CYCLE_PROMPT", "$CYCLE_OUT"), so untrusted prompt text (RSS headlines, weather)
+/// is never spliced into the shell string and substituted text is never re-scanned for placeholders.
+pub fn build_gen_command(tpl: &str) -> String {
+    Regex::new(r"\{(prompt_q|prompt|out)\}").unwrap().replace_all(tpl, |c: &regex::Captures| match &c[1] {
+        "out" => "\"$CYCLE_OUT\"".to_string(), _ => "\"$CYCLE_PROMPT\"".to_string() }).into_owned()
+}
 
 // ---------- sun / phase ----------
 /// Today's sun events for the configured location, computed from the NOAA model (minute resolution):
@@ -345,10 +354,10 @@ pub fn generate(name: &str, ctx: &Value, s: &Value) -> Option<String> {
     if out.exists() { return Some(out.to_string_lossy().into()); }
     let outs = out.to_string_lossy().to_string();
     let full = format!("{prompt}. Generate this image in ONE single text-to-image generation from this prompt alone (scene, style and any text rendered by the generator itself): do not use image_edit or any existing/reference image, and never overlay, composite or draw text with code. Save it as a PNG file at {outs}. Reply only with the path.");
-    let cmd = g["command"].as_str().unwrap_or("").replace("{prompt_q}", &quote(&full)).replace("{out}", &quote(&outs)).replace("{prompt}", &full);
+    let cmd = build_gen_command(g["command"].as_str().unwrap_or(""));
     let timeout = g["timeout"].as_u64().unwrap_or(1200).max(1200);
     println!("generating (timeout {timeout}s): {prompt}");
-    let r = sh(&cmd, timeout);
+    let r = sh_env(&cmd, &[("CYCLE_PROMPT", &full), ("CYCLE_OUT", &outs)], timeout);
     if out.exists() { return Some(outs); }
     let msg = if r.err.trim().is_empty() { r.out } else { r.err };
     let tail: String = msg.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
@@ -522,4 +531,29 @@ pub fn generate_cycle_theme_at(ctx: Option<Value>, apply: Option<bool>, force: b
         shv(&["omarchy-theme-set", "Cycle"], 180); shv(&["omarchy-theme-bg-set", &dsts], 60); println!("cycle theme: applied");
     } else { println!("cycle theme: generated (not applied; active theme is not Cycle) → {dsts}"); }
     Some(dsts)
+}
+
+#[cfg(test)]
+mod gen_cmd_tests {
+    use super::*;
+    #[test]
+    fn malicious_prompt_is_not_executed() {
+        let pwn = std::env::temp_dir().join(format!("cycle-pwned-{}", std::process::id()));
+        let _ = fs::remove_file(&pwn);
+        let evil = format!("'$(touch {})'{{prompt}}`touch {}`;touch {}", pwn.display(), pwn.display(), pwn.display());
+        for tpl in ["printf %s {prompt_q} > {out}", "printf %s {prompt} > {out}"] {
+            let out = std::env::temp_dir().join(format!("cycle-out-{}.txt", std::process::id()));
+            let cmd = build_gen_command(tpl);
+            assert!(!cmd.contains(&evil));
+            let r = sh_env(&cmd, &[("CYCLE_PROMPT", &evil), ("CYCLE_OUT", &out.to_string_lossy())], 10);
+            assert_eq!(r.code, 0);
+            assert_eq!(fs::read_to_string(&out).unwrap(), evil, "prompt must arrive verbatim as one argument");
+            let _ = fs::remove_file(&out);
+        }
+        assert!(!pwn.exists(), "command substitution in prompt was executed");
+    }
+    #[test]
+    fn single_pass_substitution() {
+        assert_eq!(build_gen_command("x {prompt_q} {prompt} {out} {other}"), "x \"$CYCLE_PROMPT\" \"$CYCLE_PROMPT\" \"$CYCLE_OUT\" {other}");
+    }
 }

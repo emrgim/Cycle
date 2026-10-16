@@ -70,6 +70,8 @@ pub fn breaking(s: &Value) -> String {
     match feed_titles(&top).into_iter().next() { Some(t) => trim60(&t), None => headline(s).0 }
 }
 pub fn clean_full(t: &str) -> String {
+    // untrusted feed text: drop control chars and placeholder/shell metacharacters
+    let t: String = t.chars().filter(|c| !c.is_control() && !matches!(c, '{' | '}' | '`' | '$' | '\\')).collect();
     let t = Regex::new(r"\s+-\s+[^-]+$").unwrap().replace(t.trim(), "").replace('"', "'");
     Regex::new(r"^[A-Z]{2,6}\s*:\s*").unwrap().replace(t.trim(), "").trim().to_string()
 }
@@ -260,5 +262,14 @@ pub fn generate_at(scheduled: bool, prompt: Option<&str>, apply_at: Option<chron
             if let Some(p) = prompt { crate::sched::mark(p, "ok", Some(&dst.to_string_lossy())); } 0
         }
         _ => { notify("Cycle: image generation failed – kept current wallpaper"); if let Some(p) = prompt { crate::sched::mark(p, "failed (generator timed out or errored)", None); } 1 }
+    }
+}
+
+#[cfg(test)]
+mod headline_tests {
+    #[test]
+    fn clean_full_strips_dangerous_chars() {
+        let c = super::clean_full("Breaking'$(touch /tmp/pwned)'{prompt}`id`\u{7}\nnews");
+        assert!(!c.contains('$') && !c.contains('{') && !c.contains('`') && !c.chars().any(|x| x.is_control()), "{c}");
     }
 }
