@@ -15,7 +15,7 @@
   "barWidget": {
     "displayName": "Cycle",
     "description": "Open Cycle from the bar; right-click applies the current slot.",
-    "category": "System",
+    "category": "Appearance",
     "allowMultiple": false,
     "defaultSection": "center"
   }
