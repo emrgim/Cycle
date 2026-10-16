@@ -3,7 +3,7 @@
   "id": "emiliano.cycle",
   "name": "Cycle",
   "version": "1.0.0",
-  "author": "Emiliano",
+  "author": "Emiliano Morgia",
   "license": "MIT",
   "description": "Icon-only launcher for Cycle (Rust). Left click opens Cycle, right click applies the current slot now.",
   "kinds": ["bar-widget"],

@@ -58,7 +58,7 @@ Make sure `~/.local/bin` is on your `PATH`.
 
 Install the bar widget (optional):
 ```sh
-cp -r omarchy-plugin/emiliano.cycle ~/.config/omarchy/plugins/
+mkdir -p ~/.config/omarchy/plugins/emiliano.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emiliano.cycle/
 # add {"id": "emiliano.cycle"} to the "center" section of ~/.config/omarchy/shell.json, then restart the shell
 ```
 
@@ -114,7 +114,7 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
 
 ## Omarchy integration: agents and the bar
 - The Omarchy bar on SuperOmi has an **agents icon** (the "My Agents" panel with usage and limits for the AI coding agents). Cycle sits next to it as a peer.
-- Cycle has its own bar widget, `emiliano.cycle` (an Omarchy quickshell plugin, see `omarchy-plugin/`), placed in the **center of the bar**. It is an icon-only button drawn with the same `BarIconButton` style as the agents icon.
+- Cycle has its own bar widget, `emiliano.cycle` (an Omarchy quickshell plugin, see `manifest.json` and `Widget.qml` in the repo root), placed in the **center of the bar**. It is an icon-only button drawn with the same `BarIconButton` style as the agents icon.
   - **Left click** opens the Cycle app (`cycle app`).
   - **Right click** triggers Cycle right away (`cycle apply-now`): it applies the current slot immediately.
 - Because Cycle is a plain CLI (`cycle tick`, `cycle state`, `cycle profile`, `cycle apply-now`, …) with JSON output, agents running on the machine can read its state or trigger it from the shell.
@@ -122,7 +122,7 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
 
 ### Install the bar widget
 ```sh
-cp -r omarchy-plugin/emiliano.cycle ~/.config/omarchy/plugins/
+mkdir -p ~/.config/omarchy/plugins/emiliano.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emiliano.cycle/
 # then add {"id": "emiliano.cycle"} to the "center" section of ~/.config/omarchy/shell.json and restart the shell
 ```
 
@@ -311,4 +311,4 @@ Also remove the `cycle.*` entries from `~/.config/omarchy/extensions/omarchy-men
 - **Does it need root?** No. Everything installs in your home directory.
 
 ## License
-License: not yet specified.
+Cycle is released under the [MIT License](LICENSE).
