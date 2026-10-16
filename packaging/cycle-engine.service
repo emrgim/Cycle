@@ -1,0 +1,5 @@
+[Unit]
+Description=Cycle engine tick (phase/conditions -> preset)
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/cycle tick
