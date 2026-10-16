@@ -144,3 +144,26 @@ Dubai, 15 Oct 2026 (GST): civil dawn 05:54 · **sunrise 06:17** · **solar noon 
 - **Log**: every override is appended to `~/.local/state/cycle/overrides.json` (`at`, `slot`, `base`, `user`). Engine state is in `~/.local/state/cycle/brightness.json`.
 - **Learning**: if a slot has 3 or more overrides in the same direction on different days (last override of each day, last 7 days with overrides), the median of those user values becomes the slot's learned base in `~/.local/state/cycle/profile.json`. Cycle moves the effective base towards it by at most 5 points per day (`current` → `target`).
 - Commands: `cycle profile`, `cycle reset-profile [SLOT]` (the override log is kept), `cycle brightness-step --slot S --base N [--at YYYY-MM-DDTHH:MM:SS]` (one brightness step, for tests). `CYCLE_STATE_DIR` and `CYCLE_BRIGHTNESS_FILE` redirect state and brightness to test files.
+
+## Screenshots
+Each tab of the Cycle app, captured on SuperOmi.
+
+### Now
+Circadian curve for today (colour temperature and brightness from the sun's elevation), the current slot and preset, and the next update.
+![Now tab](screenshots/tab-now.png)
+
+### Data
+Live data used by Cycle (Open-Meteo weather, air quality, marine, sun position).
+![Data tab](screenshots/tab-data.png)
+
+### Prompt
+Prompt cards for the generated wallpaper, with the inline composition language.
+![Prompt tab](screenshots/tab-prompt.png)
+
+### Schedule
+Clock-aligned generation slots, the next run and timing.
+![Schedule tab](screenshots/tab-schedule.png)
+
+### Settings
+Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you can hold.
+![Settings tab](screenshots/tab-settings.png)
