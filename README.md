@@ -249,8 +249,8 @@ Cycle runs the generator command itself with `bash -c`. Before running it, Cycle
 
 | Placeholder | Meaning |
 |---|---|
-| `{prompt_q}` | The full prompt, **shell-quoted** (safe to pass as one argument) |
-| `{prompt}` | The full prompt, **raw** (unquoted) |
+| `{prompt_q}` | The full prompt as one argument (expands to `"$CYCLE_PROMPT"`; never spliced into the shell string) |
+| `{prompt}` | Same as `{prompt_q}` (kept for compatibility; the prompt is always passed as one quoted argument via `$CYCLE_PROMPT`) |
 | `{out}` | Absolute path of the target PNG file Cycle expects |
 
 The command **must write a PNG** at `{out}`. Cycle then uses that file as the Cycle theme wallpaper (and archives a copy under `~/Pictures/desktop/`).
