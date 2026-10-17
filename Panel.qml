@@ -62,7 +62,8 @@ Item {
     Cycle.curve(30).then(function(d) {
       root.curveData = d
       graph.requestPaint()
-      var hold = d.hold ? ("HOLD '" + d.hold + "'") : (d.target_k + " K \u00b7 brightness " + d.target_b + "% \u00b7 sun " + d.elev + "\u00b0")
+      var elev = (d.elev === null || d.elev === undefined) ? "\u2014" : (d.elev + "\u00b0")
+      var hold = d.hold ? ("HOLD '" + d.hold + "'") : (d.target_k + " K \u00b7 brightness " + d.target_b + "% \u00b7 sun " + elev)
       nowLine.text = hold + " \u00b7 " + (d.phase || "") + " \u2192 " + (d.preset || "\u2014")
       var sun = d.sun || {}
       nextLine.text = "sunrise " + (sun.sunrise || "") + ", sunset " + (sun.sunset || "") + " \u00b7 engine: " + (d.enabled ? ("next check " + d.next_tick) : "off (manual only)")
@@ -209,9 +210,11 @@ Item {
     Cycle.settings().then(function(s) {
       root.settingsData = s
       paintFeeds()
-      locName.text = (s.location && s.location.name) || ""
-      locLat.text = s.location ? String(s.location.lat) : ""
-      locLon.text = s.location ? String(s.location.lon) : ""
+      var known = Cycle.locationKnown(s.location)
+      locName.text = known ? (s.location.name || "") : ""
+      locLat.text = known ? String(s.location.lat) : ""
+      locLon.text = known ? String(s.location.lon) : ""
+      locStatus.text = Cycle.locationStatus(s)
       var times = s.times || {}
       phaseMorning.text = times.morning || "sunrise"
       phaseAfternoon.text = times.afternoon || "solar_noon"
@@ -232,7 +235,8 @@ Item {
       rulesText.text = lines.join("\n")
       var today = new Date()
       var now = Cycle.sunEvents({ y: today.getFullYear(), mo: today.getMonth() + 1, d: today.getDate() }, s)
-      sunToday.text = (s.location && s.location.name ? s.location.name : "Location") + " today: sunrise " + (now.sunrise || "") + " \u00b7 solar noon " + (now.solar_noon || "") + " \u00b7 sunset " + (now.sunset || "") + " \u00b7 civil dusk " + (now.civil_dusk || "")
+      if (!known) sunToday.text = "location unknown, set it in Settings"
+      else sunToday.text = (s.location.name || "") + " today: sunrise " + (now.sunrise || "") + " \u00b7 solar noon " + (now.solar_noon || "") + " \u00b7 sunset " + (now.sunset || "") + " \u00b7 civil dusk " + (now.civil_dusk || "")
       return Cycle.listNames(Cycle.cyclesDir(), "json").then(function(cycles) {
         root.filling = true
         weekdayBox.model = cycles
@@ -753,16 +757,42 @@ Item {
               onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekend = weekendBox.currentText }).then(function() { root.note("Saved") }) }
             }
             Label { text: "Location"; color: "#f2efe9"; font.bold: true }
+            Label { id: locStatus; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             TextField { id: locName; placeholderText: "Name"; width: parent.width; color: "#f2efe9" }
             TextField { id: locLat; placeholderText: "Latitude"; width: parent.width; color: "#f2efe9" }
             TextField { id: locLon; placeholderText: "Longitude"; width: parent.width; color: "#f2efe9" }
-            Button {
-              text: "Save location"
-              onClicked: Cycle.updateSettings(function(s) {
-                var lat = parseFloat(locLat.text)
-                var lon = parseFloat(locLon.text)
-                s.location = { name: locName.text.trim() || "Dubai", lat: isNaN(lat) ? 25.2048 : lat, lon: isNaN(lon) ? 55.2708 : lon, source: "fixed" }
-              }).then(function() { root.note("Saved"); reloadSettings() })
+            RowLayout {
+              Button {
+                text: "Save location"
+                onClicked: {
+                  var lat = parseFloat(locLat.text)
+                  var lon = parseFloat(locLon.text)
+                  var name = locName.text.trim()
+                  if (!name || isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                    root.note("Enter a name, latitude, and longitude")
+                    return
+                  }
+                  Cycle.updateSettings(function(s) {
+                    var prev = s.location || {}
+                    s.location = { name: name, city: name, cc: prev.cc || "", lat: lat, lon: lon, tz: prev.tz || "", source: "manual" }
+                  }).then(function() { root.note("Saved"); reloadSettings() })
+                }
+              }
+              Button {
+                text: "Detect location"
+                onClicked: {
+                  root.note("Detecting location")
+                  Cycle.redetectLocation().then(function(r) {
+                    if (!r || !r.ok) {
+                      root.note((r && r.error) || "location unknown, set it in Settings")
+                      reloadSettings()
+                      return
+                    }
+                    root.note("Location detected")
+                    reloadSettings()
+                  })
+                }
+              }
             }
             Label { id: wifiLabel; textFormat: Text.PlainText; color: "#a8a39a"; wrapMode: Text.WordWrap; width: parent.width }
             PlainCombo { id: wifiCycle; width: parent.width; model: [] }

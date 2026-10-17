@@ -109,10 +109,25 @@ var overrides = JSON.parse(fs.readFileSync(path.join(process.env.CYCLE_STATE_DIR
 assert.equal(overrides[0].user, 90);
 assert.equal(overrides[0].slot, "morning");
 
+var earlyFetches = [];
+host.fetchText = async function(url, timeoutSec, maxBytes) {
+  earlyFetches.push({ url: url, timeoutSec: timeoutSec, maxBytes: maxBytes });
+  return { ok: false, text: "", error: "timeout" };
+};
 await E.seed();
 var settings = await E.settings();
 assert.equal(settings.enabled, false);
-assert.equal(settings.location.name, "Dubai");
+assert.equal(settings.location.source, "unknown");
+assert.equal(settings.location.name, "");
+assert.equal(settings.location.lat, null);
+assert.equal(E.locationText(settings), "location unknown, set it in Settings");
+assert.equal(earlyFetches.length, 1);
+assert.equal(earlyFetches[0].url, "https://get.geojs.io/v1/ip/geo.json");
+assert.equal(earlyFetches[0].timeoutSec, 4);
+assert.equal(earlyFetches[0].maxBytes, 8192);
+assert.equal(JSON.stringify(settings).indexOf("Dubai"), -1);
+await E.settings();
+assert.equal(earlyFetches.length, 1);
 assert.equal(fs.existsSync(path.join(tmp, ".config/omarchy/cycle/presets/day.json")), true);
 assert.equal(fs.existsSync(path.join(tmp, ".config/omarchy/cycle/styles")), true);
 assert.equal(fs.readdirSync(path.join(tmp, ".config/omarchy/cycle/styles")).length, 0);
@@ -146,5 +161,145 @@ eq(image.rgb[1], [0, 0, 255]);
 var toml = E.paletteFromBytes(png);
 assert.match(toml, /^mode = "(light|dark)"/);
 assert.match(toml, /accent = "#[0-9a-f]{6}"/);
+
+function geoPayload() {
+  return JSON.stringify({
+    city: "Genova",
+    country: "Italy",
+    country_code: "IT",
+    latitude: "44.4056",
+    longitude: "8.9463",
+    timezone: "Europe/Rome",
+    ip: "203.0.113.8"
+  });
+}
+async function openHost(fetchImpl) {
+  var dir = fs.mkdtempSync(path.join(os.tmpdir(), "cycle-loc-"));
+  var h = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: dir });
+  h.home = dir;
+  var calls = [];
+  h.fetchText = async function(url, timeoutSec, maxBytes) {
+    calls.push({ url: url, timeoutSec: timeoutSec, maxBytes: maxBytes });
+    return fetchImpl(url, timeoutSec, maxBytes);
+  };
+  E.setHost(h);
+  return { dir: dir, host: h, calls: calls };
+}
+function writeSaved(dir, location, extra) {
+  var base = path.join(dir, ".config/omarchy/cycle");
+  fs.mkdirSync(base, { recursive: true });
+  var body = Object.assign({
+    enabled: false,
+    location: location,
+    feeds: [{ name: "Custom", url: "https://example.com/rss", enabled: true }],
+    prompt_here: ["night-here"]
+  }, extra || {});
+  fs.writeFileSync(path.join(base, "settings.json"), JSON.stringify(body));
+}
+
+var fresh = await openHost(async function(url) {
+  if (String(url).indexOf("geojs.io") >= 0) return { ok: true, text: geoPayload(), error: "" };
+  return { ok: true, text: "{\"current\":{}}", error: "" };
+});
+await E.seed();
+var detected = await E.settings();
+assert.equal(fresh.calls.length, 1);
+assert.equal(fresh.calls[0].url, "https://get.geojs.io/v1/ip/geo.json");
+assert.equal(fresh.calls[0].timeoutSec, 4);
+assert.equal(fresh.calls[0].maxBytes, 8192);
+assert.equal(detected.location.source, "auto");
+assert.equal(detected.location.name, "Genova, Italy");
+assert.equal(detected.location.city, "Genova");
+assert.equal(detected.location.cc, "IT");
+assert.equal(detected.location.lat, 44.4056);
+assert.equal(detected.location.lon, 8.9463);
+assert.equal(detected.location.tz, "Europe/Rome");
+assert.equal(JSON.stringify(detected.location).indexOf("203.0.113.8"), -1);
+assert.equal(detected.feeds[0].name, "Google News \u00b7 Genova");
+assert.ok(detected.feeds[0].url.indexOf("Genova") >= 0);
+assert.equal(JSON.stringify(detected).indexOf("Dubai"), -1);
+await E.settings();
+await E.seed();
+assert.equal(fresh.calls.length, 1, "auto location is not detected again");
+process.env.CYCLE_HERE = "1";
+await E.settings();
+delete process.env.CYCLE_HERE;
+assert.equal(fresh.calls.length, 1, "CYCLE_HERE does not refetch");
+var live = await E.fetchLive(detected);
+eq(live.errors, []);
+assert.equal(fresh.calls.some(function(c) { return String(c.url).indexOf("Asia") >= 0 || String(c.url).indexOf("Dubai") >= 0; }), false);
+assert.ok(fresh.calls.some(function(c) { return String(c.url).indexOf("timezone=Europe%2FRome") >= 0; }));
+
+var again = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: fresh.dir });
+again.home = fresh.dir;
+var againCalls = [];
+again.fetchText = async function() { againCalls.push(1); return { ok: true, text: geoPayload(), error: "" }; };
+E.setHost(again);
+await E.seed();
+await E.settings();
+assert.equal(againCalls.length, 0, "restart keeps the auto location");
+assert.equal((await E.settings()).location.name, "Genova, Italy");
+
+async function assertKept(source, name) {
+  var box = await openHost(async function() { throw new Error("geolocation must not run"); });
+  writeSaved(box.dir, { name: name, city: name, cc: "IT", lat: 41.9, lon: 12.5, tz: "Europe/Rome", source: source });
+  process.env.CYCLE_HERE = "1";
+  await E.seed();
+  var s1 = await E.settings();
+  await E.seed();
+  var s2 = await E.settings();
+  delete process.env.CYCLE_HERE;
+  assert.equal(box.calls.length, 0, source + " location was fetched");
+  assert.equal(s1.location.name, name);
+  assert.equal(s1.location.source, source);
+  assert.equal(s1.location.lat, 41.9);
+  assert.equal(s2.location.name, name);
+  assert.equal(s2.feeds[0].name, "Custom");
+  var restarted = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: box.dir });
+  restarted.home = box.dir;
+  var n = 0;
+  restarted.fetchText = async function() { n += 1; return { ok: true, text: geoPayload(), error: "" }; };
+  E.setHost(restarted);
+  await E.seed();
+  assert.equal(n, 0, source + " location changed on restart");
+  assert.equal((await E.settings()).location.name, name);
+}
+await assertKept("manual", "Roma");
+await assertKept("fixed", "Roma");
+
+var failed = await openHost(async function() { return { ok: false, text: "", error: "timeout" }; });
+await E.seed();
+var unknown = await E.settings();
+assert.equal(failed.calls.length, 1);
+assert.equal(unknown.location.source, "unknown");
+assert.equal(unknown.location.lat, null);
+assert.equal(unknown.location.lon, null);
+assert.equal(E.locationStatus(unknown), "location unknown, set it in Settings");
+assert.equal(JSON.stringify(unknown).indexOf("Dubai"), -1);
+assert.equal(unknown.feeds[0].url.indexOf("Dubai"), -1);
+var cb = E.circadian({ y: 2026, mo: 10, d: 15, h: 12, mi: 0, s: 0 }, unknown, null);
+assert.equal(cb[2], null);
+var missed = await E.fetchLive(unknown);
+eq(missed.errors, ["location unknown, set it in Settings"]);
+await E.seed();
+await E.settings();
+assert.equal(failed.calls.length, 1, "a failed setup is not retried on the next launch");
+var failedRestart = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: failed.dir });
+failedRestart.home = failed.dir;
+var failedN = 0;
+failedRestart.fetchText = async function() { failedN += 1; return { ok: false, text: "", error: "timeout" }; };
+E.setHost(failedRestart);
+await E.seed();
+assert.equal(failedN, 0);
+assert.equal((await E.settings()).location.source, "unknown");
+
+var broken = await openHost(async function() { return { ok: true, text: "{", error: "" }; });
+await E.seed();
+assert.equal((await E.settings()).location.source, "unknown");
+assert.equal(E.locationText(await E.settings()), "location unknown, set it in Settings");
+
+var blocked = await openHost(async function() { return { ok: true, text: geoPayload(), error: "" }; });
+await assert.rejects(function() { return E.getText("http://ip-api.com/json/", 1, 2, 100); }, /https required/);
+assert.equal(blocked.calls.length, 0);
 
 console.log("cycle engine tests passed");

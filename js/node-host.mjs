@@ -100,18 +100,22 @@ export function createNodeHost(opts) {
         return true;
       } catch (e) { return false; }
     },
-    fetchText: async function(url, timeoutSec) {
-      try {
-        var res = await fetch(url, {
-          signal: AbortSignal.timeout(Math.max(1, timeoutSec || 30) * 1000),
-          headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Cycle/2" },
-        });
-        var text = await res.text();
-        if (!res.ok) return { ok: false, text: "", error: "HTTP " + res.status };
-        return { ok: true, text: text, error: "" };
-      } catch (e) {
-        return { ok: false, text: "", error: String(e && e.message || e) };
+    fetchText: async function(url, timeoutSec, maxBytes) {
+      var u = String(url || "");
+      if (u.length < 8 || u.slice(0, 8).toLowerCase() !== "https://") return { ok: false, text: "", error: "https required" };
+      for (var i = 0; i < u.length; i++) {
+        var c = u.charCodeAt(i);
+        if (c <= 32 || c === 127) return { ok: false, text: "", error: "https required" };
       }
+      var timeout = Math.max(1, timeoutSec || 8);
+      var cap = Math.max(1, maxBytes || 8192);
+      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.2 --output - -- \"$3\" | head -c \"$2\"";
+      var r = await run(["bash", "-c", script, "bash", String(timeout), String(cap), u], timeout + 2, null);
+      var text = r.out || "";
+      if (text.length > cap) text = text.slice(0, cap);
+      if (text.length >= cap) return { ok: false, text: "", error: "too large" };
+      if (r.code !== 0) return { ok: false, text: "", error: String(r.err || "").trim() || ("curl " + r.code) };
+      return { ok: true, text: text, error: "" };
     },
     sleep: function(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); },
     log: function(line) { console.log(line); },

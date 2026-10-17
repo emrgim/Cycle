@@ -60,7 +60,7 @@ The command is also available as `~/.config/omarchy/plugins/emrgim.cycle/bin/cyc
 ## First-run quickstart
 1. **Open the window** from the bar icon, or run `cycle app` (Super+Space → Cycle).
 2. **Enable Automatic Cycle** on the **Now** tab (same as `cycle engine on`).
-3. **Set your location** on **Settings** (the default is Dubai).
+3. **Location** is detected once, the first time Cycle starts with nothing saved. Change it on **Settings**, or press **Detect location** to look it up again.
 4. **Set the generator** on **Settings → Generation** if you want wallpapers.
 5. **Create a prompt** on the **Prompt** tab, for example `A wide city skyline at /time, sky /sun, weather /weather`. Check the live preview, then press **Generate**.
 6. **Schedule it** on the **Schedule** tab: pick 15, 30, 60, 120 or 180 minutes and a window (dawn–dusk or always).
@@ -122,16 +122,16 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
 - Brightness compares the real backlight with the value Cycle last set:
   - a gap of more than 2 points is recorded as an override and held until the slot changes;
   - otherwise Cycle applies the base value, which may be a learned one.
-- State files live in `~/.local/state/cycle/`: `brightness.json`, `overrides.json`, `profile.json`, `schedules.json`, `weather.json`, `last.json`, `theme.json`, `here.json`, `generate.lock`, and `open-prompt`.
+- State files live in `~/.local/state/cycle/`: `brightness.json`, `overrides.json`, `profile.json`, `schedules.json`, `weather.json`, `last.json`, `theme.json`, `generate.lock`, and `open-prompt`. The saved place is `location` in `settings.json` (`auto` from the one-time setup, `manual` when you edit it, `unknown` when setup could not detect one).
 
 ## Fresh copy: what to expect
 Enabling the plugin **generates nothing until you configure it**.
 
 - **Automatic Cycle is off.** Turn it on in the **Now** tab or with `cycle engine on`. The minute timer keeps running either way so a prompt schedule can still fire; the display engine itself does nothing until it is on, unless you pass `--force` or press Apply now.
 - **The styles folder is empty.** `~/.config/omarchy/cycle/styles` has no prompt files until you create one.
-- **Location defaults to Dubai.**
+- **Location is detected once** on that first start, from a privacy-respecting HTTPS IP geolocation lookup (city, coordinates, timezone), then stored. A location you save yourself is never replaced on restart, when the network changes, or when Cycle is updated. If the lookup fails and nothing was saved, Settings says **location unknown, set it in Settings**.
 - **Generation window** defaults to **06:00–18:00**.
-- **Default RSS feed:** Google News Dubai. **Open-Meteo** needs no API key.
+- **Default RSS feed:** Google News in English until a city is detected; the first successful detection points the feed at that city. **Open-Meteo** needs no API key.
 - **Without a working generator command**, generation fails and the **current wallpaper is kept**.
 
 Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
@@ -166,7 +166,7 @@ A call must start the text or follow whitespace or one of `( [ , ; : " '`. Insid
 | `/image1`… | – | reference image paths from `settings.images` |
 
 Examples: `/weather/city/Genova/tomorrow`, `/sunrise/tomorrow`, `/sun/city/Tokyo`, `/air/city/Genova`, `/news/query/expo_city`.
-Default location: Dubai. Network results are cached for the run. Unknown commands stay as `/call [!error]`. Rain is only described when live data reports precipitation.
+With no saved location, `/location` and the sun commands say to set it in Settings. After that, network results are cached for the run. Unknown commands stay as `/call [!error]`. Rain is only described when live data reports precipitation.
 Headlines never repeat: shown ones are recorded in `~/.config/omarchy/cycle/headlines-used.txt` (last 300) and skipped.
 `cycle expand 'text'` prints a resolved text and writes errors to stderr.
 
@@ -225,7 +225,7 @@ Boundaries are recomputed every day from the NOAA sun model for the configured c
 Also available: `civil_dawn`, `nautical_dusk` (−12°), `astronomical_dusk` (−18°).
 `settings.json` → `times` defaults to `{"morning":"sunrise","afternoon":"solar_noon","evening":"sunset","night":"civil_dusk"}`. A value may be one of those event names or a `HH:MM` clock.
 
-Dubai, 15 Oct 2026, timezone offset +4: civil dawn 05:54 · **sunrise 06:17** · **solar noon 12:04** · **sunset 17:53** · **civil dusk 18:16** · nautical dusk 18:43 · astronomical dusk 19:09.
+Sample for 15 Oct 2026 at 25.2048°N, 55.2708°E, timezone offset +4: civil dawn 05:54 · **sunrise 06:17** · **solar noon 12:04** · **sunset 17:53** · **civil dusk 18:16** · nautical dusk 18:43 · astronomical dusk 19:09.
 
 ## Brightness override and learning
 - **Override:** every tick compares the backlight with the value Cycle last set. A difference of more than 2 points is a manual change. Cycle keeps it until the next slot. Further changes in the same slot update the override.
@@ -269,7 +269,7 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 - **Brightness does not change.** `brightnessctl -m` must work for your user. A manual change is held until the next slot.
 - **Generation fails.** `cycle test-gen` or `cycle generate`. The generator must write a PNG to the output path. On failure the current wallpaper stays and a notification is sent.
 - **No prompts or schedules.** The styles folder starts empty.
-- **Wrong sunrise or sunset.** Set location on Settings. The Dubai sample above uses timezone offset +4.
+- **Wrong sunrise or sunset.** Set location on Settings. The sample above uses timezone offset +4.
 - **Learning went the wrong way.** `cycle reset-profile [SLOT]` clears learned values. The override log stays.
 - **Weather data.** Open-Meteo needs no key. Image generation uses only the command you configured.
 - **Optional display helper.** Without `omarchy-display`, dark/light, preset brightness, warmth, and night shift are skipped. Theme, wallpaper, and `brightnessctl` still run.
@@ -279,7 +279,9 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 node test/engine.test.mjs
 node test/qml-plaintext.test.mjs
 ```
-The engine checks cover the prompt language, the Dubai sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, and PNG palette extraction.
+The engine checks cover the prompt language, the sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, first-run geolocation (including a failed lookup), and PNG palette extraction.
+
+`node test/fetch-bounds.test.mjs` checks that fetches are HTTPS and that the only `XMLHttpRequest` goes through the capped helper.
 
 The QML check fails if a `Text`, `Label`, `TextArea`, or `TextEdit` shows non-literal data without `textFormat: Text.PlainText`, or if a combo box, button, or delegate shows a non-literal model or label without a plain-text `Text`. SSIDs, location names, weather and other API text, headlines, and file names stay literal characters.
 
