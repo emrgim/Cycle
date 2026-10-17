@@ -1,6 +1,0 @@
-[Unit]
-Description=Cycle Generate (manual, from the menu)
-[Service]
-Type=oneshot
-TimeoutStartSec=1500
-ExecStart=%h/.local/bin/cycle generate

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Command line for Cycle. The bar and panel run inside Omarchy without this file.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if command -v node >/dev/null 2>&1; then
+  exec node "$ROOT/js/cli.mjs" "$@"
+fi
+if command -v nodejs >/dev/null 2>&1; then
+  exec nodejs "$ROOT/js/cli.mjs" "$@"
+fi
+ENC=""
+if [ "$#" -gt 0 ]; then
+  ENC=$(printf '%s\0' "$@" | base64 | tr -d '\n')
+fi
+export CYCLE_ROOT="$ROOT"
+export CYCLE_ARGS="$ENC"
+if command -v qml6 >/dev/null 2>&1; then
+  exec qml6 "$ROOT/cli/main.qml"
+fi
+if command -v qml >/dev/null 2>&1; then
+  exec qml "$ROOT/cli/main.qml"
+fi
+printf '%s\n' "cycle: the panel runs inside Omarchy; this command needs node or qml on PATH" >&2
+exit 127
