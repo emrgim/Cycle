@@ -13,7 +13,8 @@ var host = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: tmp }
 host.home = tmp;
 E.setHost(host);
 
-function eq(actual, expected, msg) { assert.deepEqual(actual, expected, msg); }
+function plain(v) { return JSON.parse(JSON.stringify(v)); }
+function eq(actual, expected, msg) { assert.deepEqual(plain(actual), expected, msg); }
 function dt(h, mi, s) { return { y: 2026, mo: 10, d: 15, h: h, mi: mi, s: s || 0 }; }
 
 var calls = E.parseCalls("light: /sun and /weather/city/Genova/tomorrow, then /news.");
