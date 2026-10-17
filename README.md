@@ -2,9 +2,11 @@
 
 > **Your display, in step with the sun.** A time-of-day brightness, theme and wallpaper engine for Omarchy (Arch Linux + Hyprland).
 
-![Cycle — Now tab](screenshots/tab-now.png)
+The pictures below are the previous desktop window. Version 2 is the same workflow inside the Omarchy shell.
 
-**Cycle** is a native Rust app (GTK4 / libadwaita) built for **[Omarchy](https://omarchy.org)**. It runs your screen through the day: brightness and colour temperature follow the real sun position, a generated wallpaper and matching colour theme reflect live conditions outside, and when you adjust something yourself, Cycle respects it, and learns from it.
+![Previous Cycle window, Now tab](screenshots/tab-now.png)
+
+**Cycle** follows the day on **[Omarchy](https://omarchy.org)**. Brightness and colour temperature follow the real sun position, a generated wallpaper and matching colour theme reflect live conditions outside, and when you adjust something yourself, Cycle respects it and learns from it.
 
 ### Why it matters
 Most auto-brightness or night-light tools either fight you (they re-apply their value a minute after you change it) or make you edit config files to change their defaults. Cycle keeps your manual change for the rest of the time slot, and if you keep correcting it the same way, it adopts your preference as the new default.
@@ -16,61 +18,54 @@ Most auto-brightness or night-light tools either fight you (they re-apply their 
 - **Learns your preference:** 3+ overrides in the same direction on different days, and the median becomes that slot's learned brightness (approached at most 5 points per day).
 - **Live-data wallpapers + palette theme:** prompts you write are filled with live weather, air quality, sea, sun position and news headlines, sent to an image generator you configure, and applied as the wallpaper of a generated **Cycle** Omarchy theme whose colour palette is extracted from the image.
 - **Weather rules:** presets for hot (≥ 40 °C), rain and sandstorm (dust ≥ 150) conditions, from Open-Meteo (no API key).
-- **Agent and bar integration:** an icon-only bar widget in the centre of the Omarchy bar, plus a scriptable CLI with JSON output that agents on the machine can read and trigger.
-- **Lightweight:** one small binary plus a systemd user timer. No daemon, no sudo.
+- **Bar, panel, and command line:** an icon-only bar widget, a shell window, and a scriptable command with JSON output.
+- **No separate build:** the marketplace copy is the running plugin. A shell timer inside the plugin replaces the old user timer.
 
 ## Contents
 - [Key features](#key-features)
 - [Requirements](#requirements)
-- [Install from scratch](#install-from-scratch)
+- [Add from the marketplace](#add-from-the-marketplace)
 - [First-run quickstart](#first-run-quickstart)
-- [Usage (CLI)](#usage-cli)
+- [Usage (command line)](#usage-command-line)
 - [Screenshots](#screenshots)
-- [Omarchy integration: agents and the bar](#omarchy-integration-agents-and-the-bar)
+- [Omarchy integration](#omarchy-integration)
 - [How it works](#how-it-works)
-- [Fresh install: what to expect](#fresh-install-what-to-expect)
+- [Fresh copy: what to expect](#fresh-copy-what-to-expect)
 - [Generator command](#generator-command)
-- [Prompts (Prompt tab)](#prompts-prompt-tab)
+- [Prompts](#prompts)
 - [Day phases](#day-phases-no-fixed-clock-hours)
-- [Brightness override and learning](#brightness-override-and-learning-srcbrightrs)
-- [Config and state files](#where-things-live)
-- [Uninstall](#uninstall)
-- [Troubleshooting / FAQ](#troubleshooting--faq)
+- [Brightness override and learning](#brightness-override-and-learning)
+- [Where things live](#where-things-live)
+- [Remove](#remove)
+- [Troubleshooting](#troubleshooting)
+- [Testing](#testing)
 - [License](#license)
 
 ## Requirements
 - **Omarchy** (Arch Linux + Hyprland). Cycle calls Omarchy's own tools: `omarchy-theme-set`, `omarchy-theme-bg-set`, `omarchy-theme-current`, `omarchy-notification-send`, and `hyprctl hyprsunset` for colour temperature.
-- **Rust toolchain** (via `rustup`; the crate uses edition 2024, so a recent stable Rust).
-- **GTK4 ≥ 4.12 and libadwaita ≥ 1.7** (system packages: `sudo pacman -S gtk4 libadwaita`).
 - **brightnessctl** for reading and setting the backlight (`brightnessctl -m`, `brightnessctl set N%`).
-- **systemd user session** (for `cycle-engine.timer`).
 - Optional: **NetworkManager** (`nmcli`) or `iwgetid` for Wi-Fi-based location rules.
-- Optional: **[Grok CLI](https://github.com/xai-org/grok-cli)** (installed and logged in), or any other command that writes a PNG, for wallpaper generation. See [Generator command](#generator-command).
-- Optional: a `~/.local/bin/omarchy-display` helper script. Presets apply dark/light mode, preset brightness, warmth and night shift through it. It is **not** included in this repo; without it, those preset steps are skipped, while slot brightness (brightnessctl) and theme/wallpaper changes still work.
+- Optional: a logged-in image command such as the [Grok CLI](https://github.com/xai-org/grok-cli), or any other command that writes a PNG. See [Generator command](#generator-command).
+- Optional: `~/.local/bin/omarchy-display`. Presets apply dark/light mode, preset brightness, warmth and night shift through it. It is not part of this plugin; without it those preset steps are skipped, while slot brightness (`brightnessctl`) and theme/wallpaper changes still run.
+- The command line prefers `node` when it is present, and otherwise runs through `qml`. The bar widget, background service, and window do not need `node`.
 
-## Install from scratch
-```sh
-git clone https://github.com/emrgim/Cycle && cd Cycle
-./install.sh        # cargo build --release, installs ~/.local/bin/cycle, systemd user units and desktop file (no sudo)
-cycle engine on     # turn on the display engine and enable cycle-engine.timer (runs `cycle tick` every minute)
+## Add from the marketplace
+```text
+omarchy plugin add https://github.com/emrgim/Cycle.git --enable
 ```
-Make sure `~/.local/bin` is on your `PATH`.
+Omarchy copies the plugin into `~/.config/omarchy/plugins/emrgim.cycle` and enables it. Automatic Cycle stays off until you turn it on. The bar icon is placed from the manifest (`center`). Open the window from the bar or with `cycle app`.
 
-Install the bar widget (optional):
-```sh
-mkdir -p ~/.config/omarchy/plugins/emrgim.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emrgim.cycle/
-# add {"id": "emrgim.cycle"} to the "center" section of ~/.config/omarchy/shell.json, then restart the shell
-```
+The command is also available as `~/.config/omarchy/plugins/emrgim.cycle/bin/cycle`. On first use Cycle links `~/.local/bin/cycle` to that file when the destination is missing.
 
 ## First-run quickstart
-1. **Open the app:** `cycle app` (or Super+Space → Cycle).
-2. **Enable Automatic Cycle** in the **Now** tab (same as `cycle engine on`).
-3. **Set your location** in **Settings → Location and Wi-Fi** (the default is Dubai).
-4. **Set up the generator** in **Settings → Generation** if you want wallpapers (install and log into the Grok CLI, or replace the command).
-5. **Create a prompt** in the **Prompt** tab, e.g. `A wide city skyline at /time, sky /sun, weather /weather`. Check the live preview, then press **Generate** to try it.
-6. **Schedule it** on the prompt card / **Schedule** tab: pick an interval (15, 30, 60, 120 or 180 min) and a window (dawn–dusk or always).
+1. **Open the window** from the bar icon, or run `cycle app` (Super+Space → Cycle).
+2. **Enable Automatic Cycle** on the **Now** tab (same as `cycle engine on`).
+3. **Set your location** on **Settings** (the default is Dubai).
+4. **Set the generator** on **Settings → Generation** if you want wallpapers.
+5. **Create a prompt** on the **Prompt** tab, for example `A wide city skyline at /time, sky /sun, weather /weather`. Check the live preview, then press **Generate**.
+6. **Schedule it** on the **Schedule** tab: pick 15, 30, 60, 120 or 180 minutes and a window (dawn–dusk or always).
 
-## Usage (CLI)
+## Usage (command line)
 ```text
 cycle app                         open the window (tabs: Now, Data, Prompt, Schedule, Settings)
 cycle tick [--force]              one engine step (what the timer runs every minute)
@@ -82,122 +77,88 @@ cycle engine on|off | engine-is-on
 cycle generate [--prompt ID]      live data → prompt → image → Cycle theme → archive
 cycle schedules                   last/next run and status of each prompt schedule
 cycle prompts [list [--titles]|sync-menu]
-cycle open --prompt ID            open the app on a prompt
+cycle open --prompt ID            open the window on a prompt
 cycle live | prompt | expand TEXT print live data | the prompt | a resolved text
 cycle theme-gen [--force] [--apply] | test-gen
 cycle profile | reset-profile [SLOT]
-cycle brightness-step --slot S --base N [--at ISO]   (testing)
+cycle brightness-step --slot S --base N [--at ISO]
 ```
+Unknown commands exit 2. `cycle engine-is-on` exits 0 when Automatic Cycle is on and 1 when it is off.
 
 ## Screenshots
-Each tab of the Cycle app, captured on SuperOmi.
+These captures are the previous desktop window, taken on SuperOmi. The shell window has the same five tabs.
 
 ### Now
 Circadian curve for today (colour temperature and brightness from the sun's elevation), the current slot and preset, and the next update.
-![Now tab](screenshots/tab-now.png)
+![Previous window, Now tab](screenshots/tab-now.png)
 
 ### Data
 Live data used by Cycle (Open-Meteo weather, air quality, marine, sun position).
-![Data tab](screenshots/tab-data.png)
+![Previous window, Data tab](screenshots/tab-data.png)
 
 ### Prompt
 Prompt cards for the generated wallpaper, with the inline composition language.
-![Prompt tab](screenshots/tab-prompt.png)
+![Previous window, Prompt tab](screenshots/tab-prompt.png)
 
 ### Schedule
 Clock-aligned generation slots, the next run and timing.
-![Schedule tab](screenshots/tab-schedule.png)
+![Previous window, Schedule tab](screenshots/tab-schedule.png)
 
 ### Settings
 Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you can hold.
-![Settings tab](screenshots/tab-settings.png)
+![Previous window, Settings tab](screenshots/tab-settings.png)
 
-## Omarchy integration: agents and the bar
-- The Omarchy bar on SuperOmi has an **agents icon** (the "My Agents" panel with usage and limits for the AI coding agents). Cycle sits next to it as a peer.
-- Cycle has its own bar widget, `emrgim.cycle` (an Omarchy quickshell plugin, see `manifest.json` and `Widget.qml` in the repo root), placed in the **center of the bar**. It is an icon-only button drawn with the same `BarIconButton` style as the agents icon.
-  - **Left click** opens the Cycle app (`cycle app`).
-  - **Right click** triggers Cycle right away (`cycle apply-now`): it applies the current slot immediately.
-- Because Cycle is a plain CLI (`cycle tick`, `cycle state`, `cycle profile`, `cycle apply-now`, …) with JSON output, agents running on the machine can read its state or trigger it from the shell.
-- Cycle also adds entries to the Omarchy launcher menu (Super+Space → Cycle) and installs a desktop file.
-
-### Install the bar widget
-```sh
-mkdir -p ~/.config/omarchy/plugins/emrgim.cycle && cp manifest.json Widget.qml ~/.config/omarchy/plugins/emrgim.cycle/
-# then add {"id": "emrgim.cycle"} to the "center" section of ~/.config/omarchy/shell.json and restart the shell
-```
+## Omarchy integration
+- The bar widget `emrgim.cycle` sits in the **center** of the Omarchy bar. It uses the same `BarIconButton` style as the other bar icons.
+  - **Left click** opens the Cycle window.
+  - **Right click** applies the current slot immediately.
+- A kept-loaded service runs the same minute timer, so scheduled prompts still fire when the window is closed.
+- `cycle tick`, `cycle state`, `cycle profile`, and `cycle apply-now` print JSON or a short status line, so a local agent can read state or trigger a step.
+- Changing prompts rewrites the Cycle rows in `~/.config/omarchy/extensions/omarchy-menu.jsonc` between the generated markers.
 
 ## How it works
-- `cycle-engine.timer` (systemd user) runs `cycle tick` every minute.
-- On each tick, `tick` resolves the current slot from today's sun events and loads that slot's preset (brightness and warmth).
-- `bright.rs` then compares the real backlight with the value it last set:
-  - if the gap is more than 2 points, it records an override and holds your value for the rest of the slot;
-  - otherwise it applies the base value, which may be a learned one.
-- State files live in `~/.local/state/cycle/`: `brightness.json` (engine state), `overrides.json` (log) and `profile.json` (learned values).
+- After enable, the bar widget (or the kept-loaded service) starts a timer aligned to the minute. Each minute runs the same step as `cycle tick`.
+- That step resolves the current slot from today's sun events and loads that slot's preset.
+- Brightness compares the real backlight with the value Cycle last set:
+  - a gap of more than 2 points is recorded as an override and held until the slot changes;
+  - otherwise Cycle applies the base value, which may be a learned one.
+- State files live in `~/.local/state/cycle/`: `brightness.json`, `overrides.json`, `profile.json`, `schedules.json`, `weather.json`, `last.json`, `theme.json`, `here.json`, `generate.lock`, and `open-prompt`.
 
+## Fresh copy: what to expect
+Enabling the plugin **generates nothing until you configure it**.
 
-## Reference
-
-### Where things live
-State: `~/.local/state/cycle/` (`brightness.json`, `overrides.json`, `profile.json`, `schedules.json`, `weather.json`, `last.json`, `generate.lock`). Generated images: `~/.local/share/cycle/generated`. Generated theme: `~/.config/omarchy/themes/cycle`.
-
-| What | Path |
-|---|---|
-| Source (single crate) | `src/` — `main.rs` (CLI), `core.rs` (config, engine, NOAA sun, apply, theme generation), `live.rs` (Open-Meteo, RSS, prompt, `cycle generate`), `theme.rs` (palette from image, Omarchy CSS), `ui.rs` (GTK4/libadwaita window) |
-| Binary | `~/.local/bin/cycle` |
-| Settings | `~/.config/omarchy/cycle/settings.json` (+ `presets/`, `cycles/`, `styles/*.txt` prompt presets, `styles/active`, `weather-now.json`) |
-| Systemd user units | `packaging/` → `~/.config/systemd/user/`: `cycle-engine.timer` (every minute), `cycle-generate-now.service` (manual run); scheduled prompts run as transient units started by `cycle tick` |
-| Archive | `~/Pictures/desktop/YYYY-MM-DD/HHMM.png` |
-| Window styling | real Omarchy theme: `~/.config/omarchy/themed/cycle.css.tpl` rendered with `~/.local/state/omarchy/current/theme/colors.toml` |
-| Launcher menu | `~/.config/omarchy/extensions/omarchy-menu.jsonc` (`cycle.*`), `~/.local/share/applications/cycle.desktop` |
-| Floating window rule | `~/.config/hypr/looknfeel.lua` (class `dev.emiliano.Cycle`) |
-
-## Build / install / run
-```sh
-git clone https://github.com/emrgim/Cycle && cd Cycle
-cargo build --release        # needs gtk4 ≥ 4.12 and libadwaita ≥ 1.7 (system), Rust via rustup
-./install.sh                 # builds, installs ~/.local/bin/cycle, units and desktop file (no sudo)
-cycle app                    # open the window (tabs: Now, Data, Prompt, Schedule, Settings)
-cycle generate               # live data → prompt → image → apply Cycle theme → archive
-```
-Other subcommands: `tick [--force]`, `apply-now`, `resolve`, `state`, `apply-preset NAME`, `hold NAME|automatic`,
-`engine on|off`, `engine-is-on`, `theme-gen [--force] [--apply]`, `test-gen`, `live` (print live data), `prompt` (print the prompt without generating).
-`generate --prompt ID`, `schedules`, `prompts list|sync-menu`, `open --prompt ID`, `expand TEXT`.
-
-
-## Fresh install: what to expect
-Cycle starts after `./install.sh`, but **generates nothing until you configure it**.
-
-- **Automatic Cycle is off.** Turn it on in the **Now** tab. The engine timer (`cycle-engine.timer`) is only enabled by `install.sh` when the engine is already on; otherwise enable it with `cycle engine on` (or the Now tab toggle).
-- **The styles folder is empty.** `~/.config/omarchy/cycle/styles` ships with no prompt files, so there are no prompts and no schedules until you create one in the **Prompt** tab.
-- **Location defaults to Dubai** (fixed in settings until you change it).
-- **Generation window** defaults to **06:00–18:00** (dawn–dusk style scheduling once a prompt has a schedule).
+- **Automatic Cycle is off.** Turn it on in the **Now** tab or with `cycle engine on`. The minute timer keeps running either way so a prompt schedule can still fire; the display engine itself does nothing until it is on, unless you pass `--force` or press Apply now.
+- **The styles folder is empty.** `~/.config/omarchy/cycle/styles` has no prompt files until you create one.
+- **Location defaults to Dubai.**
+- **Generation window** defaults to **06:00–18:00**.
 - **Default RSS feed:** Google News Dubai. **Open-Meteo** needs no API key.
-- **Without a working generator command** (see below), generation fails and the **current wallpaper is kept**.
-- **Bar widget** (`emrgim.cycle`) is installed manually — see [Install the bar widget](#install-the-bar-widget) above.
+- **Without a working generator command**, generation fails and the **current wallpaper is kept**.
 
 Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
 
-## Prompts (Prompt tab)
+## Prompts
 Prompts are text files `~/.config/omarchy/cycle/styles/<id>.txt` (titles in `settings.prompt_titles`, the active one in `styles/active`).
-Each prompt is a card in the Prompt tab with a title, id, full editor, slash autocomplete, inline errors (red underline),
-a live preview with every variable resolved, Use / Generate / Duplicate / Delete, and a schedule.
+Each prompt has a title, id, editor, slash suggestions, error lines, a live preview, and Use / Generate / Duplicate / Delete. Saving one schedule turns the others off.
 
-### Composition language (`src/lang.rs`, unit-tested: `cargo test --release`)
+### Composition language
 ```text
 prompt   := { text | call | legacy }
-call     := "/" name { "/" arg }        -- must start the text or follow whitespace or ( [ , ; : " '
+call     := "/" name { "/" arg }
 name     := [a-z] [a-z0-9_]*
-arg      := [A-Za-z0-9_+%-]+            -- "_" or "+" inside a city/query value = space
+arg      := [A-Za-z0-9_+%-]+
 legacy   := "{{" name "}}"
-args     := { keyword }   keyword := "city" value | "query" value | "today" | "tomorrow" | "yesterday"
+args     := { keyword }
+keyword  := "city" value | "query" value | "today" | "tomorrow" | "yesterday"
 ```
+A call must start the text or follow whitespace or one of `( [ , ; : " '`. Inside a city or query value, `_`, `+`, and `%20` become a space.
+
 | Command | Args | Value |
 |---|---|---|
 | `/weather` | city, today/tomorrow/yesterday | live weather (current) or daily forecast for that day |
 | `/air` | city, day | AQI, PM2.5, PM10, dust, AOD |
 | `/sun` | city, day | phase, elevation, azimuth, shadow direction, sky colour |
 | `/dawn` `/sunrise` `/solar_noon` `/sunset` `/dusk` | city, day | civil dawn (−6°), sunrise (−0.833°), transit, sunset, civil dusk (−6°) |
-| `/location` | city | name and coordinates (geocoded with the Open-Meteo geocoding API) |
+| `/location` | city | name and coordinates (Open-Meteo geocoding) |
 | `/news` | city, query | LED billboard headline (enabled feeds; with args a Google News search) |
 | `/breaking` | – | Google News top story, falls back to `/news` |
 | `/phase` `/time` `/date` `/now` `/today` `/tomorrow` `/yesterday` | – | day phase / clock / dates |
@@ -205,110 +166,119 @@ args     := { keyword }   keyword := "city" value | "query" value | "today" | "t
 | `/image1`… | – | reference image paths from `settings.images` |
 
 Examples: `/weather/city/Genova/tomorrow`, `/sunrise/tomorrow`, `/sun/city/Tokyo`, `/air/city/Genova`, `/news/query/expo_city`.
-Default location: Dubai. Network results are cached for the run. Unknown commands/invalid args are flagged in the editor and
-left as `/call [!error]` if generated anyway. Rain is only described when live data reports precipitation.
-Headlines never repeat: shown ones are recorded in `~/.config/omarchy/cycle/headlines-used.txt` and skipped.
-`cycle expand 'text'` prints a resolved text (errors on stderr).
+Default location: Dubai. Network results are cached for the run. Unknown commands stay as `/call [!error]`. Rain is only described when live data reports precipitation.
+Headlines never repeat: shown ones are recorded in `~/.config/omarchy/cycle/headlines-used.txt` (last 300) and skipped.
+`cycle expand 'text'` prints a resolved text and writes errors to stderr.
+
+`{{location}}`, `{{temperature}}`, `{{condition}}`, and `{{phase}}` are filled before the slash language.
 
 ### Schedules
-`settings.schedules.<id> = {"enabled": true, "every_min": 60, "window": "dawn-dusk" | "always"}` (editable on the card).
-Slots are aligned to the clock, not intervals: `every_min` 15 → :00 :15 :30 :45, 30 → :00 :30, 60 → hourly at :00,
-120 → :00 of even hours, 180 → :00 of hours divisible by 3 (other values fall back to hourly). Next run = next aligned mark inside
-the window (dawn → civil dusk by default). Manual runs (menu / Generate button) never shift the slots. If a run is still going
-when a mark arrives, that mark is skipped (status “skipped HH:MM”). Fired/skipped marks are recorded as `last_slot` in
-`~/.local/state/cycle/schedules.json`.
-`cycle-engine.timer` runs `cycle tick` every minute; tick starts due prompts as transient units `cycle-gen-HHMMSS`
-(`cycle generate --prompt <id>`). A lock file (`~/.local/state/cycle/generate.lock`, pid) prevents overlapping runs.
-Each run re-resolves every variable, generates (timeout ≥ 1200 s), applies the Cycle theme and archives to
-`~/Pictures/desktop/YYYY-MM-DD/HHMM.png`; a failed or stale run applies/archives nothing and sends a notification.
-`cycle schedules` shows last/next run and status. The old hourly cycle-weather/cycle-generate timers are gone.
+`settings.schedules.<id> = {"enabled": true, "every_min": 60, "window": "dawn-dusk" | "always", "anticipate": false}`.
+Slots are aligned to the clock: 15 → :00 :15 :30 :45, 30 → :00 :30, 60 → hourly at :00, 120 → :00 of even hours, 180 → :00 of hours divisible by 3 (other values fall back to hourly). The next run is the next aligned mark inside the window (dawn to civil dusk by default). Manual runs do not move `last_slot`.
+If a generation is still running when its mark has not yet passed, Cycle waits. If the mark has passed and the previous run is still going, that mark is skipped and the status records it.
+The lock file `~/.local/state/cycle/generate.lock` holds the process id. A lock whose process is gone is treated as stale.
+Each run re-resolves every variable, generates (timeout at least 1200 s), applies the Cycle theme and archives to `~/Pictures/desktop/YYYY-MM-DD/HHMM.png`. A run that must not apply (`CYCLE_NO_APPLY`) archives as `HHMM-{slug}.png` instead. A failed run keeps the current wallpaper and sends a notification.
+`cycle schedules` shows last/next run and status.
 
 ### Launcher menu
-`Cycle Prompts` (in the Super+Space Cycle menu) lists every prompt by title; each opens Generate / Edit
-(`cycle generate --prompt <id>`, `cycle open --prompt <id>`). The rows are generated into
-`omarchy-menu.jsonc` by `cycle prompts sync-menu` (run automatically when prompts change), because the Omarchy shell only
-supports its built-in providers. `cycle prompts list [--titles]`.
-
-The image command is `generator.command` in settings (default `grok -p {prompt_q} --always-approve --output-format json`) with
-`generator.timeout` (default and minimum 1200 s). If generation fails or times out, the current wallpaper is kept.
-
+Prompt rows are written into `omarchy-menu.jsonc` by `cycle prompts sync-menu` (also after a prompt change in the window). Each prompt offers Generate and Edit. `cycle prompts list [--titles]`.
 
 ## Generator command
-In the Cycle app, open the **Settings** tab and scroll to the bottom. The last section is **Generation**. It has three fields:
+On **Settings**, the Generation section stores:
 
 | Field | What it is |
 |---|---|
 | **Prompt template** | Text used when building the image prompt |
-| **Generator command** | Shell command Cycle runs to produce the wallpaper PNG |
-| **Generator timeout (s)** | Timeout for that command (seconds) |
+| **Generator command** | Command Cycle runs to produce the wallpaper PNG |
+| **Timeout (s)** | Timeout for that command; the effective value is at least 1200 |
 
-The same values are stored in `~/.config/omarchy/cycle/settings.json` under `generator.command`, `generator.timeout`, and the prompt template fields.
+The same values live in `~/.config/omarchy/cycle/settings.json` under `generator`.
 
-### How Cycle runs the command
-Cycle runs the generator command itself with `bash -c`. Before running it, Cycle substitutes placeholders in the command string:
+Cycle runs the command template with `bash -c`. Placeholders are replaced in one pass, and the prompt and output path are passed as environment values, never spliced into the command text:
 
 | Placeholder | Meaning |
 |---|---|
-| `{prompt_q}` | The full prompt as one argument (expands to `"$CYCLE_PROMPT"`; never spliced into the shell string) |
-| `{prompt}` | Same as `{prompt_q}` (kept for compatibility; the prompt is always passed as one quoted argument via `$CYCLE_PROMPT`) |
-| `{out}` | Absolute path of the target PNG file Cycle expects |
+| `{prompt_q}` | `"$CYCLE_PROMPT"` |
+| `{prompt}` | `"$CYCLE_PROMPT"` |
+| `{out}` | `"$CYCLE_OUT"` |
 
-The command **must write a PNG** at `{out}`. Cycle then uses that file as the Cycle theme wallpaper (and archives a copy under `~/Pictures/desktop/`).
+Other braces, such as `{other}`, stay as written. Headline text is stripped of control characters and of `` ` ``, `$`, `\`, `{`, and `}` before it can become prompt text. The command must write a PNG at the output path. If it fails or times out, the current wallpaper stays and a notification is sent.
 
-### Default (Grok CLI)
-The default `generator.command` is pre-filled as:
+The default command string is:
 
-```sh
+```text
 grok -p {prompt_q} --always-approve --output-format json
 ```
 
-That is the [Grok CLI](https://github.com/xai-org/grok-cli) only as a **default string**. Cycle does **not** install or log you into Grok. On a fresh machine you must install the Grok CLI separately and complete its login before generation works. Any other command that saves a PNG to `{out}` is a valid replacement (another image CLI, a local script, a curl wrapper, etc.).
-
-### Timeout and failure
-The effective timeout is at least **1200 seconds**: the code uses `max(timeout, 1200)`. If generation fails or times out, Cycle **keeps the current wallpaper**, applies nothing from that run, and shows a **desktop notification**.
+That names the [Grok CLI](https://github.com/xai-org/grok-cli) only as a default. Cycle does not fetch or sign in to it. Any other command that writes a PNG to the output path is a valid replacement.
 
 ## Day phases (no fixed clock hours)
-Boundaries are recomputed every day from the NOAA sun model for the configured location (`core::sun_events`):
+Boundaries are recomputed every day from the NOAA sun model for the configured coordinates. The clock used for "now" is the machine's timezone.
 
 | Phase | Starts at | Variable |
 |---|---|---|
 | morning | sunrise (sun at −0.833°) | `sunrise` |
-| afternoon | solar noon (meridian transit) | `solar_noon` |
+| afternoon | solar noon (last minute of maximum elevation) | `solar_noon` |
 | evening | sunset (−0.833°) | `sunset` |
-| night | civil dusk, end of civil twilight (−6°) | `civil_dusk` |
+| night | civil dusk (−6°) | `civil_dusk` |
 
-Also available but not used as boundaries: `civil_dawn`, `nautical_dusk` (−12°), `astronomical_dusk` (−18°).
-`settings.json` → `times` = `{"morning":"sunrise","afternoon":"solar_noon","evening":"sunset","night":"civil_dusk"}`.
+Also available: `civil_dawn`, `nautical_dusk` (−12°), `astronomical_dusk` (−18°).
+`settings.json` → `times` defaults to `{"morning":"sunrise","afternoon":"solar_noon","evening":"sunset","night":"civil_dusk"}`. A value may be one of those event names or a `HH:MM` clock.
 
-Dubai, 15 Oct 2026 (GST): civil dawn 05:54 · **sunrise 06:17** · **solar noon 12:04** · **sunset 17:53** · **civil dusk 18:16** · nautical dusk 18:43 · astronomical dusk 19:09.
+Dubai, 15 Oct 2026, timezone offset +4: civil dawn 05:54 · **sunrise 06:17** · **solar noon 12:04** · **sunset 17:53** · **civil dusk 18:16** · nautical dusk 18:43 · astronomical dusk 19:09.
 
-## Brightness override and learning (`src/bright.rs`)
-- **Override**: every tick Cycle compares the screen brightness with the value it last set. A difference of more than 2 points is a manual change: Cycle keeps it and does not touch brightness again until the next slot (day phase: morning / afternoon / evening / night). Further manual changes in the same slot update the override.
-- **Log**: every override is appended to `~/.local/state/cycle/overrides.json` (`at`, `slot`, `base`, `user`). Engine state is in `~/.local/state/cycle/brightness.json`.
-- **Learning**: if a slot has 3 or more overrides in the same direction on different days (last override of each day, last 7 days with overrides), the median of those user values becomes the slot's learned base in `~/.local/state/cycle/profile.json`. Cycle moves the effective base towards it by at most 5 points per day (`current` → `target`).
-- Commands: `cycle profile`, `cycle reset-profile [SLOT]` (the override log is kept), `cycle brightness-step --slot S --base N [--at YYYY-MM-DDTHH:MM:SS]` (one brightness step, for tests). `CYCLE_STATE_DIR` and `CYCLE_BRIGHTNESS_FILE` redirect state and brightness to test files.
+## Brightness override and learning
+- **Override:** every tick compares the backlight with the value Cycle last set. A difference of more than 2 points is a manual change. Cycle keeps it until the next slot. Further changes in the same slot update the override.
+- **Log:** each override is appended to `~/.local/state/cycle/overrides.json` (`at`, `slot`, `base`, `user`).
+- **Learning:** 3 or more same-direction overrides on different days, using the last override of each day within the last 7 days, set the slot's learned base to their median. Cycle moves toward it by at most 5 points per day. An even count rounds halves away from zero for the median of positive values (standard half-up).
+- Commands: `cycle profile`, `cycle reset-profile [SLOT]` (the override log is kept), `cycle brightness-step --slot S --base N [--at YYYY-MM-DDTHH:MM:SS]`. `CYCLE_STATE_DIR` and `CYCLE_BRIGHTNESS_FILE` redirect state and the brightness file.
 
-## Uninstall
-```sh
-systemctl --user disable --now cycle-engine.timer
-rm -f ~/.config/systemd/user/cycle-engine.{service,timer} ~/.config/systemd/user/cycle-generate-now.service
-systemctl --user daemon-reload
-rm -f ~/.local/bin/cycle ~/.local/share/applications/cycle.desktop
-rm -rf ~/.config/omarchy/plugins/emrgim.cycle    # and remove its entry from ~/.config/omarchy/shell.json
-# optional, removes all settings, prompts, logs and generated images:
-rm -rf ~/.config/omarchy/cycle ~/.local/state/cycle ~/.local/share/cycle ~/.config/omarchy/themes/cycle
+Colour temperature is applied with `hyprctl hyprsunset`. At 6500 K or above Cycle asks hyprsunset for identity. If hyprsunset is not running, Cycle starts it directly.
+
+## Where things live
+| What | Path |
+|---|---|
+| Plugin tree | `~/.config/omarchy/plugins/emrgim.cycle` |
+| Command | `bin/cycle` in that tree, and `~/.local/bin/cycle` when the link is created |
+| Settings | `~/.config/omarchy/cycle/settings.json` |
+| Presets and cycles | `presets/*.json`, `cycles/*.json` next to settings |
+| Prompts | `styles/*.txt`, `styles/active` |
+| Live snapshot | `~/.config/omarchy/cycle/weather-now.json` |
+| State | `~/.local/state/cycle/` |
+| Generated images | `~/.local/share/cycle/generated` |
+| Generated theme | `~/.config/omarchy/themes/cycle` |
+| Archive | `~/Pictures/desktop/YYYY-MM-DD/HHMM.png` |
+| Launcher menu | `~/.config/omarchy/extensions/omarchy-menu.jsonc` |
+
+Engine source is `js/engine.js`, shared by the shell and by `node js/cli.mjs`. The shell host is `EngineHost.qml`. The window is `Panel.qml`, the bar icon is `Widget.qml`, and the kept-loaded timer is `Service.qml`.
+
+## Remove
+```text
+omarchy plugin remove emrgim.cycle
 ```
-Also remove the `cycle.*` entries from `~/.config/omarchy/extensions/omarchy-menu.jsonc` if present. Switch to another Omarchy theme first if the Cycle theme is active.
+That drops the plugin tree. Settings, prompts, logs, and generated images stay until you remove them:
 
-## Troubleshooting / FAQ
-- **Nothing changes during the day.** Automatic Cycle is off on a fresh install: run `cycle engine on` and check `systemctl --user status cycle-engine.timer`. Run `cycle tick --force` to see what it does.
-- **Brightness doesn't change.** Check `brightnessctl -m` works for your user (backlight permissions). If you changed brightness by hand, Cycle is holding your override until the next slot. That's by design.
-- **Generation fails / wallpaper never changes.** Run `cycle test-gen` or `cycle generate` in a terminal. Check that the generator command works on its own and writes a PNG to `{out}`. On failure the current wallpaper is kept and a notification is shown.
-- **No prompts or schedules.** The styles folder starts empty; create a prompt in the Prompt tab.
-- **Wrong sunrise/sunset times.** Set your location in Settings; slots are computed for the configured coordinates.
-- **Learning went the wrong way.** `cycle reset-profile [SLOT]` clears learned values (the override log is kept).
-- **Does it need an API key?** Not for weather data (Open-Meteo). Image generation depends on the generator you configure.
-- **Does it need root?** No. Everything installs in your home directory.
+```text
+rm -rf ~/.config/omarchy/cycle ~/.local/state/cycle ~/.local/share/cycle ~/.config/omarchy/themes/cycle
+rm -f ~/.local/bin/cycle
+```
+Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Switch to another Omarchy theme first if the Cycle theme is active.
+
+## Troubleshooting
+- **Nothing changes during the day.** Automatic Cycle is off until you enable it. `cycle engine on`, then `cycle tick --force` to see one step.
+- **Brightness does not change.** `brightnessctl -m` must work for your user. A manual change is held until the next slot.
+- **Generation fails.** `cycle test-gen` or `cycle generate`. The generator must write a PNG to the output path. On failure the current wallpaper stays and a notification is sent.
+- **No prompts or schedules.** The styles folder starts empty.
+- **Wrong sunrise or sunset.** Set location on Settings. The Dubai sample above uses timezone offset +4.
+- **Learning went the wrong way.** `cycle reset-profile [SLOT]` clears learned values. The override log stays.
+- **Weather data.** Open-Meteo needs no key. Image generation uses only the command you configured.
+- **Optional display helper.** Without `omarchy-display`, dark/light, preset brightness, warmth, and night shift are skipped. Theme, wallpaper, and `brightnessctl` still run.
+
+## Testing
+```text
+node test/engine.test.mjs
+```
+The checks cover the prompt language, the Dubai sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, and PNG palette extraction.
 
 ## License
 Cycle is released under the [MIT License](LICENSE).

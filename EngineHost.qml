@@ -1,0 +1,267 @@
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+// Process and file bridge for the Cycle engine. Paths and file bodies travel as
+// arguments or environment values. The shell text itself is fixed.
+Item {
+  id: root
+  property var api: null
+  property var onMinute: null
+  property var queue: []
+  property var longQueue: []
+  property bool busy: false
+  property bool longBusy: false
+  property var current: null
+  property var longCurrent: null
+
+  function pluginRootPath() {
+    var fromEnv = Quickshell.env("CYCLE_ROOT")
+    if (fromEnv && fromEnv.length) return fromEnv
+    return Quickshell.env("HOME") + "/.config/omarchy/plugins/emrgim.cycle"
+  }
+
+  function b64decode(input) {
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    var str = String(input).replace(/\s/g, "")
+    var out = []
+    var buffer = 0
+    var bits = 0
+    for (var i = 0; i < str.length; i++) {
+      if (str.charAt(i) === "=") break
+      var val = chars.indexOf(str.charAt(i))
+      if (val < 0) continue
+      buffer = (buffer << 6) | val
+      bits += 6
+      if (bits >= 8) {
+        bits -= 8
+        out.push((buffer >> bits) & 255)
+      }
+    }
+    return out
+  }
+
+  function startTimer() { bootTimer.start() }
+
+  function enqueue(args, timeout, env, longJob) {
+    return new Promise(function(resolve) {
+      var job = { args: args, timeout: timeout || 10, env: env, resolve: resolve }
+      if (longJob) { root.longQueue.push(job); root.pumpLong() }
+      else { root.queue.push(job); root.pump() }
+    })
+  }
+
+  function pump() {
+    if (root.busy || !root.queue.length) return
+    root.busy = true
+    root.current = root.queue.shift()
+    launch(proc, procOut, procErr, procTimer, root.current)
+  }
+  function pumpLong() {
+    if (root.longBusy || !root.longQueue.length) return
+    root.longBusy = true
+    root.longCurrent = root.longQueue.shift()
+    launch(longProc, longOut, longErr, longTimer, root.longCurrent)
+  }
+  function launch(target, out, err, timer, job) {
+    if (out.clear) out.clear()
+    if (err.clear) err.clear()
+    target.command = job.args
+    target.environment = job.env || ({})
+    timer.interval = Math.max(1, job.timeout) * 1000
+    timer.start()
+    target.running = true
+  }
+  function finishShort(code) {
+    procTimer.stop()
+    var job = root.current
+    root.current = null
+    root.busy = false
+    if (job) job.resolve({ code: code, out: procOut.text || "", err: procErr.text || "" })
+    root.pump()
+  }
+  function finishLong(code) {
+    longTimer.stop()
+    var job = root.longCurrent
+    root.longCurrent = null
+    root.longBusy = false
+    if (job) job.resolve({ code: code, out: longOut.text || "", err: longErr.text || "" })
+    root.pumpLong()
+  }
+
+  Timer { id: bootTimer; interval: 5000; onTriggered: root.align() }
+  Timer { id: alignTimer; onTriggered: { if (root.onMinute) root.onMinute(); minuteTimer.start() } }
+  Timer { id: minuteTimer; interval: 60000; repeat: true; onTriggered: if (root.onMinute) root.onMinute() }
+  function align() {
+    if (root.onMinute) root.onMinute()
+    var n = new Date()
+    var ms = (60 - n.getSeconds()) * 1000 - n.getMilliseconds()
+    if (ms < 200) ms += 60000
+    alignTimer.interval = ms
+    alignTimer.start()
+  }
+
+  Process {
+    id: proc
+    stdout: StdioCollector { id: procOut }
+    stderr: StdioCollector { id: procErr }
+    onExited: function(code) { root.finishShort(code) }
+  }
+  Process {
+    id: longProc
+    stdout: StdioCollector { id: longOut }
+    stderr: StdioCollector { id: longErr }
+    onExited: function(code) { root.finishLong(code) }
+  }
+  Timer {
+    id: procTimer
+    onTriggered: { if (proc.running) proc.signal(15); procKill.start() }
+  }
+  Timer {
+    id: procKill
+    interval: 2000
+    onTriggered: if (proc.running) proc.signal(9)
+  }
+  Timer {
+    id: longTimer
+    onTriggered: { if (longProc.running) longProc.signal(15); longKill.start() }
+  }
+  Timer {
+    id: longKill
+    interval: 2000
+    onTriggered: if (longProc.running) longProc.signal(9)
+  }
+
+  Component.onCompleted: {
+    root.api = {
+      home: Quickshell.env("HOME") || "/root",
+      pluginRoot: root.pluginRootPath(),
+      linkCli: true,
+      pid: 0,
+      env: function(name) { return Quickshell.env(name) || "" },
+      setEnv: function(name, value) { root.api._env = root.api._env || ({}); root.api._env[name] = value },
+      now: function() {
+        var d = new Date()
+        return {
+          y: d.getFullYear(), mo: d.getMonth() + 1, d: d.getDate(),
+          h: d.getHours(), mi: d.getMinutes(), s: d.getSeconds(), ms: d.getMilliseconds(),
+          tzHours: -d.getTimezoneOffset() / 60,
+          weekday: (d.getDay() + 6) % 7
+        }
+      },
+      selfPid: async function() {
+        var r = await root.enqueue(["sh", "-c", "printf %s \"$PPID\""], 5, null, false)
+        var n = parseInt(String(r.out || "").trim(), 10)
+        if (n) root.api.pid = n
+        return root.api.pid
+      },
+      readFile: async function(p) {
+        var r = await root.enqueue(["sh", "-c", "cat -- \"$1\"", "sh", p], 20, null, false)
+        return r.code === 0 ? r.out : null
+      },
+      writeFile: async function(p, body) {
+        var r = await root.enqueue(["sh", "-c", "mkdir -p \"$(dirname \"$CYCLE_PATH\")\" && printf '%s' \"$CYCLE_BODY\" > \"$CYCLE_PATH.tmp\" && mv -f \"$CYCLE_PATH.tmp\" \"$CYCLE_PATH\"", "sh"], 20, { CYCLE_PATH: p, CYCLE_BODY: String(body) }, false)
+        return r.code === 0
+      },
+      removeFile: async function(p) {
+        await root.enqueue(["rm", "-f", "--", p], 10, null, false)
+        return true
+      },
+      exists: async function(p) {
+        var r = await root.enqueue(["sh", "-c", "test -e \"$1\"", "sh", p], 5, null, false)
+        return r.code === 0
+      },
+      listDir: async function(p) {
+        var r = await root.enqueue(["find", p, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%f\\n"], 10, null, false)
+        if (r.code !== 0) return []
+        var lines = String(r.out || "").split("\n")
+        var out = []
+        for (var i = 0; i < lines.length; i++) {
+          if (!lines[i]) continue
+          var tab = lines[i].indexOf("\t")
+          if (tab < 0) continue
+          out.push({ name: lines[i].slice(tab + 1), isFile: lines[i].charAt(0) === "f" })
+        }
+        return out
+      },
+      mkdirp: async function(p) {
+        var r = await root.enqueue(["mkdir", "-p", "--", p], 10, null, false)
+        return r.code === 0
+      },
+      copyFile: async function(src, dst) {
+        var r = await root.enqueue(["cp", "-f", "--", src, dst], 30, null, false)
+        return r.code === 0
+      },
+      rename: async function(src, dst) {
+        var r = await root.enqueue(["mv", "-f", "--", src, dst], 10, null, false)
+        return r.code === 0
+      },
+      readlink: async function(p) {
+        var r = await root.enqueue(["readlink", "-n", "--", p], 5, null, false)
+        return r.code === 0 ? String(r.out) : null
+      },
+      symlink: async function(src, dst) {
+        var r = await root.enqueue(["ln", "-s", "--", src, dst], 5, null, false)
+        return r.code === 0
+      },
+      createNew: async function(p, body) {
+        var r = await root.enqueue(["sh", "-c", "set -C; printf %s \"$2\" > \"$1\"", "sh", p, String(body)], 5, null, false)
+        return r.code === 0
+      },
+      pidAlive: async function(pid) {
+        var r = await root.enqueue(["sh", "-c", "test -d \"/proc/$1\"", "sh", String(pid)], 5, null, false)
+        return r.code === 0
+      },
+      mtime: async function(p) {
+        var r = await root.enqueue(["stat", "-c", "%Y", "--", p], 5, null, false)
+        if (r.code !== 0) return null
+        var sec = parseInt(String(r.out).trim(), 10)
+        return isNaN(sec) ? null : sec * 1000
+      },
+      readBytes: async function(p) {
+        var r = await root.enqueue(["base64", "-w", "0", "--", p], 60, null, false)
+        if (r.code !== 0) return null
+        return root.b64decode(r.out || "")
+      },
+      exec: function(args, timeout, env) { return root.enqueue(args, timeout, env, false) },
+      execLong: function(args, timeout, env) { return root.enqueue(args, timeout, env, true) },
+      spawnDetached: function(args) {
+        try { Quickshell.execDetached(args); return Promise.resolve(true) }
+        catch (e) { return Promise.resolve(false) }
+      },
+      fetchText: function(url, timeoutSec) {
+        return new Promise(function(resolve) {
+          var xhr = new XMLHttpRequest()
+          xhr.open("GET", url)
+          xhr.setRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Cycle/2")
+          xhr.timeout = Math.max(1, timeoutSec || 30) * 1000
+          xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true, text: xhr.responseText, error: "" })
+            else resolve({ ok: false, text: "", error: "HTTP " + xhr.status })
+          }
+          xhr.onerror = function() { resolve({ ok: false, text: "", error: "network" }) }
+          xhr.ontimeout = function() { resolve({ ok: false, text: "", error: "timeout" }) }
+          xhr.send()
+        })
+      },
+      sleep: function(ms) {
+        return new Promise(function(resolve) {
+          var t = Qt.createQmlObject("import QtQuick; Timer {}", root)
+          t.interval = Math.max(1, ms)
+          t.repeat = false
+          t.triggered.connect(function() { resolve(); t.destroy() })
+          t.start()
+        })
+      },
+      log: function(line) { console.log(String(line)) },
+      logErr: function(line) { console.log(String(line)) },
+      startTimer: function() { root.startTimer() }
+    }
+    var baseEnv = root.api.env
+    root.api.env = function(name) {
+      if (root.api._env && Object.prototype.hasOwnProperty.call(root.api._env, name)) return root.api._env[name] || ""
+      return baseEnv(name)
+    }
+  }
+}

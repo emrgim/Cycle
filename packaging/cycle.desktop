@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=Cycle
-Comment=Daily display/theme cycle
-Exec=cycle app
-StartupWMClass=dev.emiliano.Cycle
-Icon=weather-clear
-Type=Application
-Categories=Settings;
