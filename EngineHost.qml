@@ -43,6 +43,92 @@ Item {
 
   function startTimer() { bootTimer.start() }
 
+  function httpsUrl(url) {
+    var u = String(url || "")
+    if (u.length < 8 || u.slice(0, 8).toLowerCase() !== "https://") return false
+    for (var i = 0; i < u.length; i++) {
+      var c = u.charCodeAt(i)
+      if (c <= 32 || c === 127) return false
+    }
+    return true
+  }
+
+  // Fallback only when curl is missing. xhr.timeout does not fire in this shell; a Timer calls abort. readyState 3 and progress abort once the body passes the cap, and Content-Length is refused before the body is read.
+  function cappedXhr(url, timeoutSec, maxBytes) {
+    return new Promise(function(resolve) {
+      if (!root.httpsUrl(url)) {
+        resolve({ ok: false, text: "", error: "https required" })
+        return
+      }
+      var cap = maxBytes > 0 ? maxBytes : 8192
+      var xhr = new XMLHttpRequest()
+      var settled = false
+      var timer = Qt.createQmlObject("import QtQuick; Timer {}", root)
+      function finish(result) {
+        if (settled) return
+        settled = true
+        timer.stop()
+        timer.destroy()
+        resolve(result)
+      }
+      timer.interval = Math.max(1, timeoutSec || 8) * 1000
+      timer.repeat = false
+      timer.triggered.connect(function() {
+        try { xhr.abort() } catch (e) {}
+        finish({ ok: false, text: "", error: "timeout" })
+      })
+      xhr.open("GET", url)
+      xhr.setRequestHeader("User-Agent", "Cycle/2.0.2")
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 2) {
+          var len = parseInt(xhr.getResponseHeader("Content-Length") || "", 10)
+          if (!isNaN(len) && len > cap) {
+            xhr.abort()
+            finish({ ok: false, text: "", error: "too large" })
+            return
+          }
+        }
+        if (xhr.readyState === 3 || xhr.readyState === 4) {
+          var body = xhr.responseText || ""
+          if (body.length > cap) {
+            xhr.abort()
+            finish({ ok: false, text: "", error: "too large" })
+            return
+          }
+        }
+        if (xhr.readyState === 4 && !settled) {
+          if (xhr.status >= 200 && xhr.status < 300) finish({ ok: true, text: xhr.responseText || "", error: "" })
+          else finish({ ok: false, text: "", error: "HTTP " + xhr.status })
+        }
+      }
+      xhr.onprogress = function() {
+        var got = xhr.responseText || ""
+        if (got.length > cap) {
+          xhr.abort()
+          finish({ ok: false, text: "", error: "too large" })
+        }
+      }
+      xhr.onerror = function() { finish({ ok: false, text: "", error: "network" }) }
+      timer.start()
+      xhr.send()
+    })
+  }
+
+  function fetchCapped(url, timeoutSec, maxBytes) {
+    if (!root.httpsUrl(url)) return Promise.resolve({ ok: false, text: "", error: "https required" })
+    var cap = maxBytes > 0 ? maxBytes : 8192
+    var timeout = timeoutSec > 0 ? timeoutSec : 8
+    var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.2 --output - -- \"$3\" | head -c \"$2\""
+    return root.enqueue(["bash", "-c", script, "bash", String(timeout), String(cap), String(url)], timeout + 2, null, false).then(function(r) {
+      if (r.code === 127) return root.cappedXhr(url, timeout, cap)
+      var text = r.out || ""
+      if (text.length > cap) text = text.slice(0, cap)
+      if (text.length >= cap) return { ok: false, text: "", error: "too large" }
+      if (r.code !== 0) return { ok: false, text: "", error: String(r.err || "").trim() || ("curl " + r.code) }
+      return { ok: true, text: text, error: "" }
+    })
+  }
+
   function enqueue(args, timeout, env, longJob) {
     return new Promise(function(resolve) {
       var job = { args: args, timeout: timeout || 10, env: env, resolve: resolve }
@@ -229,22 +315,7 @@ Item {
         try { Quickshell.execDetached(args); return Promise.resolve(true) }
         catch (e) { return Promise.resolve(false) }
       },
-      fetchText: function(url, timeoutSec) {
-        return new Promise(function(resolve) {
-          var xhr = new XMLHttpRequest()
-          xhr.open("GET", url)
-          xhr.setRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Cycle/2")
-          xhr.timeout = Math.max(1, timeoutSec || 30) * 1000
-          xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true, text: xhr.responseText, error: "" })
-            else resolve({ ok: false, text: "", error: "HTTP " + xhr.status })
-          }
-          xhr.onerror = function() { resolve({ ok: false, text: "", error: "network" }) }
-          xhr.ontimeout = function() { resolve({ ok: false, text: "", error: "timeout" }) }
-          xhr.send()
-        })
-      },
+      fetchText: function(url, timeoutSec, maxBytes) { return root.fetchCapped(url, timeoutSec, maxBytes) },
       sleep: function(ms) {
         return new Promise(function(resolve) {
           var t = Qt.createQmlObject("import QtQuick; Timer {}", root)
