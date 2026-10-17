@@ -277,8 +277,11 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 ## Testing
 ```text
 node test/engine.test.mjs
+node test/qml-plaintext.test.mjs
 ```
-The checks cover the prompt language, the Dubai sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, and PNG palette extraction.
+The engine checks cover the prompt language, the Dubai sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, and PNG palette extraction.
+
+The QML check fails if a `Text`, `Label`, `TextArea`, or `TextEdit` shows non-literal data without `textFormat: Text.PlainText`, or if a combo box, button, or delegate shows a non-literal model or label without a plain-text `Text`. SSIDs, location names, weather and other API text, headlines, and file names stay literal characters.
 
 ## License
 Cycle is released under the [MIT License](LICENSE).

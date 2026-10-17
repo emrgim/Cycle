@@ -287,6 +287,37 @@ Item {
     }
   }
 
+  // Names, SSIDs, and other external strings are drawn as plain text.
+  component PlainCombo: ComboBox {
+    id: combo
+    contentItem: Text {
+      text: combo.displayText
+      textFormat: Text.PlainText
+      font: combo.font
+      color: combo.palette.text
+      verticalAlignment: Text.AlignVCenter
+      elide: Text.ElideRight
+      leftPadding: combo.mirrored ? combo.indicator.width + combo.spacing : 12
+      rightPadding: combo.mirrored ? 12 : combo.indicator.width + combo.spacing
+    }
+    delegate: ItemDelegate {
+      width: ListView.view.width
+      text: modelData
+      highlighted: combo.highlightedIndex === index
+      hoverEnabled: combo.hoverEnabled
+      contentItem: Text {
+        text: parent.text
+        textFormat: Text.PlainText
+        font: parent.font
+        color: parent.highlighted ? parent.palette.highlightedText : parent.palette.text
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+        leftPadding: 12
+        rightPadding: 12
+      }
+    }
+  }
+
   EngineHost {
     id: engineHost
     onMinute: function() { Cycle.tick(false) }
@@ -331,8 +362,8 @@ Item {
             width: parent.width
             spacing: 8
             Label { text: "Circadian curve"; color: "#f2efe9"; font.bold: true }
-            Label { id: nowLine; wrapMode: Text.WordWrap; width: parent.width; color: "#f2efe9" }
-            Label { id: nextLine; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: nowLine; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#f2efe9" }
+            Label { id: nextLine; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             Canvas {
               id: graph
               width: parent.width
@@ -387,7 +418,7 @@ Item {
             RowLayout {
               width: parent.width
               Label { text: "Preset"; color: "#f2efe9" }
-              ComboBox {
+              PlainCombo {
                 id: holdBox
                 Layout.fillWidth: true
                 model: ["Automatic"]
@@ -414,7 +445,7 @@ Item {
               }
             }
             Label { text: "Resolution"; color: "#f2efe9"; font.bold: true }
-            Label { id: resolveText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: resolveText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
           }
         }
 
@@ -433,9 +464,9 @@ Item {
                 onClicked: Cycle.refreshLive().then(function(d) { root.liveData = d; paintLive(d); root.note("Live data refreshed") })
               }
             }
-            Label { id: liveText; wrapMode: Text.WordWrap; width: parent.width; color: "#f2efe9" }
+            Label { id: liveText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#f2efe9" }
             Label { text: "RSS feeds"; color: "#f2efe9"; font.bold: true }
-            Label { id: feedList; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: feedList; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             TextField { id: feedIndex; placeholderText: "Index to edit (blank = new)"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
             TextField { id: feedName; placeholderText: "Name"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
             TextField { id: feedUrl; placeholderText: "Feed address"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
@@ -490,8 +521,8 @@ Item {
             id: promptCol
             width: parent.width
             spacing: 8
-            Label { text: root.editingId && root.editingId === root.activeId ? "Prompt  \u2713 active" : "Prompt"; color: "#f2efe9"; font.bold: true }
-            ComboBox {
+            Label { text: root.editingId && root.editingId === root.activeId ? "Prompt  \u2713 active" : "Prompt"; textFormat: Text.PlainText; color: "#f2efe9"; font.bold: true }
+            PlainCombo {
               id: promptBox
               width: parent.width
               model: []
@@ -574,6 +605,7 @@ Item {
               height: 160
               TextArea {
                 id: promptEdit
+                textFormat: TextEdit.PlainText
                 wrapMode: Text.WordWrap
                 color: "#f2efe9"
                 onTextChanged: refreshPromptMeta()
@@ -587,6 +619,15 @@ Item {
                 model: suggestRow.model
                 Button {
                   text: modelData
+                  contentItem: Text {
+                    text: parent.text
+                    textFormat: Text.PlainText
+                    font: parent.font
+                    color: parent.palette.buttonText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                  }
                   onClicked: {
                     var tok = tailToken(promptEdit.text)
                     var cur = tok.split("/").pop()
@@ -596,7 +637,7 @@ Item {
                 }
               }
             }
-            Label { id: errorLabel; wrapMode: Text.WordWrap; width: parent.width; color: "#e06c75"; visible: false }
+            Label { id: errorLabel; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#e06c75"; visible: false }
             Button {
               text: "Save"
               onClicked: {
@@ -628,7 +669,7 @@ Item {
               }
             }
             Label { text: "Live preview"; color: "#f2efe9"; font.bold: true }
-            Label { id: previewLabel; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: previewLabel; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             Timer {
               id: previewTimer
               interval: 500
@@ -651,12 +692,12 @@ Item {
             spacing: 8
             Label { text: "Mode"; color: "#f2efe9"; font.bold: true }
             Label { text: "Clock-aligned slots. Manual runs do not move them."; color: "#a8a39a"; wrapMode: Text.WordWrap; width: parent.width }
-            ComboBox { id: schedPrompt; width: parent.width; model: []; onActivated: { if (!root.filling) applyScheduleForm(root.settingsData, currentText) } }
+            PlainCombo { id: schedPrompt; width: parent.width; model: []; onActivated: { if (!root.filling) applyScheduleForm(root.settingsData, currentText) } }
             Switch { id: schedOn; text: "Scheduled" }
             ComboBox { id: modeBox; width: parent.width; model: ["15 min", "30 min", "60 min", "120 min", "180 min"] }
             ComboBox { id: windowBox; width: parent.width; model: ["dawn\u2013dusk", "always"] }
             Switch { id: anticipateSwitch; text: "Anticipate generation delay" }
-            Label { id: schedInfo; color: "#f2efe9"; wrapMode: Text.WordWrap; width: parent.width }
+            Label { id: schedInfo; textFormat: Text.PlainText; color: "#f2efe9"; wrapMode: Text.WordWrap; width: parent.width }
             Button {
               text: "Save schedule"
               onClicked: {
@@ -676,7 +717,7 @@ Item {
             id: setCol
             width: parent.width
             spacing: 8
-            Label { id: sunToday; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: sunToday; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             Label { text: "Phase boundaries"; color: "#f2efe9"; font.bold: true }
             TextField { id: phaseMorning; placeholderText: "Morning starts at"; width: parent.width; color: "#f2efe9" }
             TextField { id: phaseAfternoon; placeholderText: "Afternoon starts at"; width: parent.width; color: "#f2efe9" }
@@ -699,13 +740,13 @@ Item {
               }
             }
             Label { text: "Day type"; color: "#f2efe9"; font.bold: true }
-            ComboBox {
+            PlainCombo {
               id: weekdayBox
               width: parent.width
               model: []
               onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekday = weekdayBox.currentText }).then(function() { root.note("Saved") }) }
             }
-            ComboBox {
+            PlainCombo {
               id: weekendBox
               width: parent.width
               model: []
@@ -723,8 +764,8 @@ Item {
                 s.location = { name: locName.text.trim() || "Dubai", lat: isNaN(lat) ? 25.2048 : lat, lon: isNaN(lon) ? 55.2708 : lon, source: "fixed" }
               }).then(function() { root.note("Saved"); reloadSettings() })
             }
-            Label { id: wifiLabel; color: "#a8a39a"; wrapMode: Text.WordWrap; width: parent.width }
-            ComboBox { id: wifiCycle; width: parent.width; model: [] }
+            Label { id: wifiLabel; textFormat: Text.PlainText; color: "#a8a39a"; wrapMode: Text.WordWrap; width: parent.width }
+            PlainCombo { id: wifiCycle; width: parent.width; model: [] }
             Button {
               text: "Map current Wi-Fi"
               onClicked: Cycle.wifiSsid().then(function(ssid) {
@@ -739,7 +780,7 @@ Item {
               text: "Use weather rules"
               onToggled: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.weather) s.weather = {}; s.weather.enabled = weatherOn.checked }).then(function() { root.note("Saved") }) }
             }
-            Label { id: rulesText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { id: rulesText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             TextField { id: ruleIndex; placeholderText: "Rule index"; text: "0"; width: parent.width; color: "#f2efe9" }
             TextField { id: ruleWhen; placeholderText: "Condition, e.g. temperature >= 40"; width: parent.width; color: "#f2efe9" }
             TextField { id: rulePreset; placeholderText: "Preset id"; width: parent.width; color: "#f2efe9" }
@@ -806,7 +847,7 @@ Item {
               }
             }
             Label { text: "Preset values"; color: "#f2efe9"; font.bold: true }
-            ComboBox {
+            PlainCombo {
               id: presetBox
               width: parent.width
               model: []
@@ -850,9 +891,9 @@ Item {
               }
             }
             Label { text: "Cycle phases"; color: "#f2efe9"; font.bold: true }
-            ComboBox { id: cycleEdit; width: parent.width; model: [] }
+            PlainCombo { id: cycleEdit; width: parent.width; model: [] }
             ComboBox { id: cyclePhase; width: parent.width; model: ["morning", "afternoon", "evening", "night"] }
-            ComboBox { id: cyclePreset; width: parent.width; model: [] }
+            PlainCombo { id: cyclePreset; width: parent.width; model: [] }
             Button {
               text: "Save phase mapping"
               onClicked: {
@@ -887,6 +928,7 @@ Item {
       Label {
         Layout.fillWidth: true
         text: root.noteText
+        textFormat: Text.PlainText
         color: "#e0a050"
         elide: Text.ElideRight
       }

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emrgim.cycle",
   "name": "Cycle",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Emiliano Morgia",
   "license": "MIT",
   "description": "Brightness, theme, and wallpaper that follow the sun on Omarchy, learning from your manual brightness corrections.",
