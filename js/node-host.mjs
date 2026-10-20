@@ -90,7 +90,16 @@ export function createNodeHost(opts) {
     },
     pidAlive: async function(pid) { return fs.existsSync("/proc/" + pid); },
     mtime: async function(p) { try { return fs.statSync(p).mtimeMs; } catch (e) { return null; } },
-    readBytes: async function(p) { try { return fs.readFileSync(p); } catch (e) { return null; } },
+    readBytes: async function(p, maxBytes) {
+      try {
+        var cap = (typeof maxBytes === "number" && maxBytes > 0) ? maxBytes : (48 * 1024 * 1024);
+        var st = fs.statSync(p);
+        if (!st.isFile() || !(st.size > 0) || st.size > cap) return null;
+        var data = fs.readFileSync(p);
+        if (data.length > cap) return null;
+        return data;
+      } catch (e) { return null; }
+    },
     exec: function(args, timeout, env) { return run(args, timeout, env); },
     execLong: function(args, timeout, env) { return run(args, timeout, env); },
     spawnDetached: async function(args) {
@@ -109,7 +118,7 @@ export function createNodeHost(opts) {
       }
       var timeout = Math.max(1, timeoutSec || 8);
       var cap = Math.max(1, maxBytes || 8192);
-      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.2 --output - -- \"$3\" | head -c \"$2\"";
+      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.3 --output - -- \"$3\" | head -c \"$2\"";
       var r = await run(["bash", "-c", script, "bash", String(timeout), String(cap), u], timeout + 2, null);
       var text = r.out || "";
       if (text.length > cap) text = text.slice(0, cap);
