@@ -21,10 +21,15 @@ Item {
     return Quickshell.env("HOME") + "/.config/omarchy/plugins/emrgim.cycle"
   }
 
-  function b64decode(input) {
+  function b64decode(input, maxBytes) {
     var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    var str = String(input).replace(/\s/g, "")
-    var out = []
+    var str = String(input || "").replace(/\s/g, "")
+    var cap = (typeof maxBytes === "number" && maxBytes > 0) ? maxBytes : (48 * 1024 * 1024)
+    if (str.length > (Math.floor(cap / 3) + 1) * 4 + 4) return null
+    var room = Math.floor(str.length * 3 / 4)
+    if (room > cap) room = cap
+    var out = (typeof Uint8Array === "function") ? new Uint8Array(room) : new Array(room)
+    var n = 0
     var buffer = 0
     var bits = 0
     for (var i = 0; i < str.length; i++) {
@@ -35,9 +40,13 @@ Item {
       bits += 6
       if (bits >= 8) {
         bits -= 8
-        out.push((buffer >> bits) & 255)
+        if (n >= cap || n >= out.length) return null
+        out[n++] = (buffer >> bits) & 255
       }
     }
+    if (n === out.length) return out
+    if (out.subarray) return out.subarray(0, n)
+    out.length = n
     return out
   }
 
@@ -78,7 +87,7 @@ Item {
         finish({ ok: false, text: "", error: "timeout" })
       })
       xhr.open("GET", url)
-      xhr.setRequestHeader("User-Agent", "Cycle/2.0.2")
+      xhr.setRequestHeader("User-Agent", "Cycle/2.0.3")
       xhr.onreadystatechange = function() {
         if (xhr.readyState === 2) {
           var len = parseInt(xhr.getResponseHeader("Content-Length") || "", 10)
@@ -118,7 +127,7 @@ Item {
     if (!root.httpsUrl(url)) return Promise.resolve({ ok: false, text: "", error: "https required" })
     var cap = maxBytes > 0 ? maxBytes : 8192
     var timeout = timeoutSec > 0 ? timeoutSec : 8
-    var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.2 --output - -- \"$3\" | head -c \"$2\""
+    var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.3 --output - -- \"$3\" | head -c \"$2\""
     return root.enqueue(["bash", "-c", script, "bash", String(timeout), String(cap), String(url)], timeout + 2, null, false).then(function(r) {
       if (r.code === 127) return root.cappedXhr(url, timeout, cap)
       var text = r.out || ""
@@ -304,10 +313,17 @@ Item {
         var sec = parseInt(String(r.out).trim(), 10)
         return isNaN(sec) ? null : sec * 1000
       },
-      readBytes: async function(p) {
+      readBytes: async function(p, maxBytes) {
+        var cap = (typeof maxBytes === "number" && maxBytes > 0) ? maxBytes : (48 * 1024 * 1024)
+        var st = await root.enqueue(["stat", "-c", "%s", "--", p], 5, null, false)
+        if (st.code !== 0) return null
+        var n = parseInt(String(st.out || "").trim(), 10)
+        if (!(n > 0) || n > cap) return null
         var r = await root.enqueue(["base64", "-w", "0", "--", p], 60, null, false)
         if (r.code !== 0) return null
-        return root.b64decode(r.out || "")
+        var bytes = root.b64decode(r.out || "", cap)
+        if (!bytes || bytes.length > cap) return null
+        return bytes
       },
       exec: function(args, timeout, env) { return root.enqueue(args, timeout, env, false) },
       execLong: function(args, timeout, env) { return root.enqueue(args, timeout, env, true) },

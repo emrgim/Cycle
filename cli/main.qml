@@ -12,6 +12,7 @@ QtObject {
     if (enc.length && hostItem) {
       var bytes = hostItem.b64decode(enc)
       var cur = ""
+      if (!bytes) bytes = []
       for (var i = 0; i < bytes.length; i++) {
         if (bytes[i] === 0) { args.push(cur); cur = "" }
         else cur += String.fromCharCode(bytes[i])

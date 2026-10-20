@@ -159,8 +159,38 @@ eq(image.width, 2);
 eq(image.rgb[0], [255, 0, 0]);
 eq(image.rgb[1], [0, 0, 255]);
 var toml = E.paletteFromBytes(png);
-assert.match(toml, /^mode = "(light|dark)"/);
-assert.match(toml, /accent = "#[0-9a-f]{6}"/);
+assert.equal(toml, [
+  "mode = \"dark\"",
+  "",
+  "accent = \"#7070ea\"",
+  "selection = \"#272767\"",
+  "muted = \"#897575\"",
+  "",
+  "background = \"#1c1111\"",
+  "dark_background = \"#160d0d\"",
+  "darker_background = \"#0f0909\"",
+  "lighter_background = \"#331e1e\"",
+  "",
+  "foreground = \"#e8e2e2\"",
+  "dark_foreground = \"#a38e8e\"",
+  "light_foreground = \"#e8e2e2\"",
+  "bright_foreground = \"#ffffff\"",
+  "",
+  "red = \"#ea7070\"",
+  "yellow = \"#eacf70\"",
+  "green = \"#72ea70\"",
+  "cyan = \"#70eaea\"",
+  "blue = \"#7099ea\"",
+  "magenta = \"#e870ea\"",
+  "",
+  "bright_red = \"#f09c9c\"",
+  "bright_yellow = \"#f0de9c\"",
+  "bright_green = \"#9ef09c\"",
+  "bright_cyan = \"#9cf0f0\"",
+  "bright_blue = \"#9cb9f0\"",
+  "bright_magenta = \"#ef9cf0\"",
+  ""
+].join("\n"));
 
 function geoPayload() {
   return JSON.stringify({

@@ -277,9 +277,12 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 ## Testing
 ```text
 node test/engine.test.mjs
+node test/png-bounds.test.mjs
 node test/qml-plaintext.test.mjs
 ```
 The engine checks cover the prompt language, the sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, first-run geolocation (including a failed lookup), and PNG palette extraction.
+
+`node test/png-bounds.test.mjs` checks that a truncated IDAT, a deflate bomb, and oversized dimensions are rejected, and that a valid wallpaper still produces the same palette.
 
 `node test/fetch-bounds.test.mjs` checks that fetches are HTTPS and that the only `XMLHttpRequest` goes through the capped helper.
 
