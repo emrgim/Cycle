@@ -277,10 +277,13 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 ## Testing
 ```text
 node test/engine.test.mjs
+node test/date-bounds.test.mjs
 node test/png-bounds.test.mjs
 node test/qml-plaintext.test.mjs
 ```
 The engine checks cover the prompt language, the sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, first-run geolocation (including a failed lookup), and PNG palette extraction.
+
+`node test/date-bounds.test.mjs` checks that a hostile forecast offset (`utc_offset_seconds` of `1e300`, `Infinity`, or a value outside ±14 hours) cannot spin city sun expansion, and that date arithmetic still rolls real dates.
 
 `node test/png-bounds.test.mjs` checks that a truncated IDAT, a deflate bomb, and oversized dimensions are rejected, and that a valid wallpaper still produces the same palette.
 
