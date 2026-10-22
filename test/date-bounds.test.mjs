@@ -13,7 +13,8 @@ function stamp(y, mo, d, h, mi, s) {
   return { y: y, mo: mo, d: d, h: h, mi: mi, s: s };
 }
 function add(dt, mins) { return E.dateAddMinutes(dt, mins); }
-function eq(actual, expected, msg) { assert.deepEqual(actual, expected, msg); }
+function plain(v) { return JSON.parse(JSON.stringify(v)); }
+function eq(actual, expected, msg) { assert.deepEqual(plain(actual), expected, msg); }
 function assertCivil(dt, msg) {
   assert.equal(typeof dt.y, "number", msg);
   assert.ok(isFinite(dt.y), msg);
