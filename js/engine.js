@@ -39,7 +39,15 @@ var DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var MON = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 var MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-var MDAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+// Day-of-year prefix for months 1..12 in a non-leap year. A table, not a walk:
+// a hostile month must not be able to spin ordinal().
+var CUMDAYS = [0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+// Real civil offsets, including :30 and :45 zones. Anything outside is rejected.
+var TZ_HOURS_MIN = -14;
+var TZ_HOURS_MAX = 14;
+// 10000 Gregorian years of minutes. Stays an exact integer, so a huge delta
+// clamps instead of walking month lengths that floating point can no longer shrink.
+var MINUTE_CAP = 10000 * 366 * 1440;
 var KEEP = "\u2014 keep current \u2014";
 var TOP_FEED = "https://news.google.com/rss?hl=en&gl=US&ceid=US:en";
 var GEO_URL = "https://get.geojs.io/v1/ip/geo.json";
@@ -84,7 +92,9 @@ function arm(h) {
 
 function pad(n, w) {
   var s = String(n);
-  while (s.length < w) s = "0" + s;
+  var width = (typeof w === "number" && isFinite(w) && w > 0) ? w : 0;
+  if (width > 8) width = 8;
+  while (s.length < width) s = "0" + s;
   return s;
 }
 function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
@@ -103,21 +113,75 @@ function join() {
   return p;
 }
 function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
-function dim(y, m) { return m === 2 && isLeap(y) ? 29 : MDAYS[m]; }
+function isIntBetween(n, lo, hi) {
+  return typeof n === "number" && isFinite(n) && Math.floor(n) === n && n >= lo && n <= hi;
+}
 function ordinal(y, m, d) {
-  var n = d;
-  for (var i = 1; i < m; i++) n += dim(y, i);
+  if (!isIntBetween(m, 1, 12)) return d;
+  var n = CUMDAYS[m] + d;
+  if (m > 2 && isLeap(y)) n += 1;
   return n;
 }
+function divTrunc(a, b) {
+  var q = a / b;
+  return q < 0 ? Math.ceil(q) : Math.floor(q);
+}
+function foldMonth(y, mo) {
+  if (!isIntBetween(y, -1000000, 1000000) || !isIntBetween(mo, -120000, 120000)) return null;
+  var idx = mo - 1;
+  var shift = Math.floor(idx / 12);
+  var m0 = idx - shift * 12;
+  if (m0 < 0) { m0 += 12; shift -= 1; }
+  var year = y + shift;
+  if (!isIntBetween(year, -1000000, 1000000)) return null;
+  return { y: year, mo: m0 + 1 };
+}
+// Howard Hinnant's civil calendar conversion. Constant time, and it matches
+// the old month walk for every real date Cycle actually rolls.
+function daysFromCivil(y, m, d) {
+  y -= m <= 2 ? 1 : 0;
+  var era = divTrunc(y >= 0 ? y : y - 399, 400);
+  var yoe = y - era * 400;
+  var doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  var doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function civilFromDays(z) {
+  z += 719468;
+  var era = divTrunc(z >= 0 ? z : z - 146096, 146097);
+  var doe = z - era * 146097;
+  var yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  var y = yoe + era * 400;
+  var doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  var mp = Math.floor((5 * doy + 2) / 153);
+  var d = doy - Math.floor((153 * mp + 2) / 5) + 1;
+  var m = mp + (mp < 10 ? 3 : -9);
+  y += m <= 2 ? 1 : 0;
+  return { y: y, mo: m, d: d };
+}
+function safeDate() { return { y: 1970, mo: 1, d: 1, h: 0, mi: 0, s: 0 }; }
 function dateAddMinutes(dt, mins) {
-  var total = dt.h * 60 + dt.mi + mins;
+  var folded = foldMonth(dt && dt.y, dt && dt.mo);
+  var day = dt && dt.d;
+  if (!folded || !isIntBetween(day, -3660000, 3660000)) return safeDate();
+  var h = (typeof dt.h === "number" && isFinite(dt.h)) ? dt.h : 0;
+  var mi = (typeof dt.mi === "number" && isFinite(dt.mi)) ? dt.mi : 0;
+  // NaN and infinities are not a shift. A finite but absurd count is clamped
+  // so the day serial stays an exact integer and this function always returns.
+  var add = (typeof mins === "number" && isFinite(mins)) ? mins : 0;
+  var total = h * 60 + mi + add;
+  if (!isFinite(total)) total = (add < 0 || h < 0 || mi < 0) ? -MINUTE_CAP : MINUTE_CAP;
+  else if (total > MINUTE_CAP) total = MINUTE_CAP;
+  else if (total < -MINUTE_CAP) total = -MINUTE_CAP;
   var days = Math.floor(total / 1440);
   var rem = total - days * 1440;
   if (rem < 0) { rem += 1440; days -= 1; }
-  var y = dt.y, mo = dt.mo, d = dt.d + days;
-  while (d > dim(y, mo)) { d -= dim(y, mo); mo += 1; if (mo > 12) { mo = 1; y += 1; } }
-  while (d < 1) { mo -= 1; if (mo < 1) { mo = 12; y -= 1; } d += dim(y, mo); }
-  return { y: y, mo: mo, d: d, h: Math.floor(rem / 60), mi: rem % 60, s: dt.s || 0 };
+  var serial = daysFromCivil(folded.y, folded.mo, day) + days;
+  if (!isFinite(serial)) return safeDate();
+  var civil = civilFromDays(serial);
+  var sec = dt.s || 0;
+  if (typeof sec !== "number" || !isFinite(sec)) sec = 0;
+  return { y: civil.y, mo: civil.mo, d: civil.d, h: Math.floor(rem / 60), mi: rem % 60, s: sec };
 }
 function dateEq(a, b) {
   if (!a || !b) return false;
@@ -282,6 +346,21 @@ function finiteCoord(v, min, max) {
   var n = typeof v === "number" ? v : parseFloat(v);
   if (typeof n !== "number" || !isFinite(n) || n < min || n > max) return null;
   return n;
+}
+function civilTz(v) {
+  if (typeof v !== "number" || !isFinite(v) || v < TZ_HOURS_MIN || v > TZ_HOURS_MAX) return null;
+  return v;
+}
+function utcOffsetHours(seconds) {
+  if (typeof seconds !== "number" || !isFinite(seconds)) return null;
+  return civilTz(seconds / 3600);
+}
+function geoPoint(row) {
+  if (!row || typeof row !== "object") return null;
+  var lat = finiteCoord(row.latitude, -90, 90);
+  var lon = finiteCoord(row.longitude, -180, 180);
+  if (lat == null || lon == null) return null;
+  return { row: row, lat: lat, lon: lon, pop: num(row.population) };
 }
 function parseGeo(j) {
   if (!j || typeof j !== "object") return null;
@@ -460,9 +539,11 @@ function sunPosTz(when, lat, lon, tz) {
   return [90 - zen * 180 / PI, az];
 }
 function sunEventsAt(day, la, lo, tz) {
+  var zone = civilTz(tz);
+  if (zone == null) zone = 0;
   var el = [];
   var base = { y: day.y, mo: day.mo, d: day.d, h: 0, mi: 0, s: 0 };
-  for (var m = 0; m <= 1440; m++) el.push(sunPosTz(dateAddMinutes(base, m), la, lo, tz)[0]);
+  for (var m = 0; m <= 1440; m++) el.push(sunPosTz(dateAddMinutes(base, m), la, lo, zone)[0]);
   var noon = 0;
   for (var i = 1; i <= 1440; i++) if (el[i] >= el[noon]) noon = i;
   function hm(min) { return pad(Math.floor(min / 60) % 24, 2) + ":" + pad(min % 60, 2); }
@@ -959,7 +1040,8 @@ async function curve(step) {
   var res = await resolveState(true);
   var pts = [];
   var day0 = { y: now.y, mo: now.mo, d: now.d, h: 0, mi: 0, s: 0 };
-  var st = step || 30;
+  // A zero, negative, or tiny step never reaches the end of the day.
+  var st = (typeof step === "number" && isFinite(step) && step >= 1) ? step : 30;
   for (var m = 0; m <= 1440; m += st) {
     var c = circadian(dateAddMinutes(day0, m), s, peak);
     pts.push([m, c[0], c[1], c[2]]);
@@ -1232,7 +1314,8 @@ async function cachedJson(url) {
   return v;
 }
 async function placeFor(s, city) {
-  var localTz = host.now().tzHours;
+  var localTz = civilTz(host.now().tzHours);
+  if (localTz == null) localTz = 0;
   if (!city) {
     var loc = s.location || {};
     if (!locationKnown(loc)) throw new Error(UNKNOWN_LOCATION);
@@ -1243,23 +1326,31 @@ async function placeFor(s, city) {
   for (var i = 0; i < langs.length; i++) {
     try {
       var g = await cachedJson("https://geocoding-api.open-meteo.com/v1/search?name=" + enc(city) + "&count=10&language=" + langs[i] + "&format=json");
-      var results = g.results || [];
-      for (var r = 0; r < results.length; r++) all.push(results[r]);
+      // A JSON object with a fake length must not be walked as an array.
+      var results = (g && Array.isArray(g.results)) ? g.results : [];
+      var nRes = results.length > 50 ? 50 : results.length;
+      for (var r = 0; r < nRes; r++) {
+        var pt = geoPoint(results[r]);
+        if (pt) all.push(pt);
+      }
     } catch (e) {}
     var big = false;
-    for (var b = 0; b < all.length; b++) if (num(all[b].population) > 100000) big = true;
+    for (var b = 0; b < all.length; b++) if (all[b].pop > 100000) big = true;
     if (big) break;
   }
   if (!all.length) throw new Error("city '" + city + "' not found");
   var best = all[0];
-  for (var k = 1; k < all.length; k++) if (num(all[k].population) > num(best.population)) best = all[k];
-  var lat = num(best.latitude), lon = num(best.longitude);
+  for (var k = 1; k < all.length; k++) if (all[k].pop > best.pop) best = all[k];
+  // Forecast utc_offset_seconds is untrusted. Only a real civil offset is
+  // kept; 1e300, NaN, and Infinity fall back to the machine zone.
   var off = localTz;
   try {
-    var fc = await cachedJson("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=is_day&timezone=auto");
-    if (typeof fc.utc_offset_seconds === "number") off = fc.utc_offset_seconds / 3600;
+    var fc = await cachedJson("https://api.open-meteo.com/v1/forecast?latitude=" + best.lat + "&longitude=" + best.lon + "&current=is_day&timezone=auto");
+    var parsed = utcOffsetHours(fc && fc.utc_offset_seconds);
+    if (parsed != null) off = parsed;
   } catch (e2) {}
-  return { name: (best.name || city) + ", " + (best.country || ""), lat: lat, lon: lon, tz: off };
+  var row = best.row;
+  return { name: (row.name || city) + ", " + (row.country || ""), lat: best.lat, lon: best.lon, tz: off };
 }
 function optsDay(o) { return addDays(nowDt(), o.day); }
 async function weatherFor(s, o) {
@@ -1273,7 +1364,13 @@ async function weatherFor(s, o) {
   var v = await cachedJson("https://api.open-meteo.com/v1/forecast?latitude=" + p.lat + "&longitude=" + p.lon + "&timezone=auto&past_days=1&forecast_days=3&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,wind_speed_10m_max,uv_index_max,cloud_cover_mean");
   var i = o.day + 1;
   var dd = v.daily || {};
-  function at(key) { return dd[key] && typeof dd[key][i] === "number" ? dd[key][i] : 0; }
+  function at(key) {
+    var n = dd[key] && dd[key][i];
+    // Daily forecast values are display numbers. Reject non-finite and absurd
+    // magnitudes from a hostile payload before they reach formatting.
+    if (typeof n !== "number" || !isFinite(n) || n > 1e6 || n < -1e6) return 0;
+    return n;
+  }
   return p.name + " on " + fmtShort(optsDay(o)) + ": " + roundHalf(at("temperature_2m_min")) + "\u2013" + roundHalf(at("temperature_2m_max")) + "\u00b0C, " + condition(dd.weather_code && typeof dd.weather_code[i] === "number" ? dd.weather_code[i] : 0) + ", " + roundHalf(at("cloud_cover_mean")) + "% cloud, precipitation " + (Math.round(at("precipitation_sum") * 10) / 10).toFixed(1) + " mm, wind up to " + roundHalf(at("wind_speed_10m_max")) + " km/h, UV " + roundHalf(at("uv_index_max"));
 }
 async function airFor(s, o) {
@@ -1291,10 +1388,15 @@ async function airFor(s, o) {
 }
 async function sunFor(s, o) {
   var p = await placeFor(s, o.city);
-  var localTz = host.now().tzHours;
-  var shift = Math.round((p.tz - localTz) * 60) + o.day * 1440;
+  var localTz = civilTz(host.now().tzHours);
+  if (localTz == null) localTz = 0;
+  var cityTz = civilTz(p.tz);
+  if (cityTz == null) cityTz = localTz;
+  var day = (o && typeof o.day === "number" && isFinite(o.day)) ? o.day : 0;
+  var shift = Math.round((cityTz - localTz) * 60) + day * 1440;
+  if (!isFinite(shift)) shift = 0;
   var when = dateAddMinutes(nowDt(), shift);
-  var pos = sunPosTz(when, p.lat, p.lon, p.tz);
+  var pos = sunPosTz(when, p.lat, p.lon, cityTz);
   var t = sunText({ sun: { elevation: pos[0], azimuth: pos[1] } });
   if (o.city || o.day) t = p.name + " at " + fmtHm(when) + " " + fmtShort(when) + ": " + t;
   return t;

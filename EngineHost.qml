@@ -87,7 +87,7 @@ Item {
         finish({ ok: false, text: "", error: "timeout" })
       })
       xhr.open("GET", url)
-      xhr.setRequestHeader("User-Agent", "Cycle/2.0.3")
+      xhr.setRequestHeader("User-Agent", "Cycle/2.0.4")
       xhr.onreadystatechange = function() {
         if (xhr.readyState === 2) {
           var len = parseInt(xhr.getResponseHeader("Content-Length") || "", 10)
@@ -127,7 +127,7 @@ Item {
     if (!root.httpsUrl(url)) return Promise.resolve({ ok: false, text: "", error: "https required" })
     var cap = maxBytes > 0 ? maxBytes : 8192
     var timeout = timeoutSec > 0 ? timeoutSec : 8
-    var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.3 --output - -- \"$3\" | head -c \"$2\""
+    var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.4 --output - -- \"$3\" | head -c \"$2\""
     return root.enqueue(["bash", "-c", script, "bash", String(timeout), String(cap), String(url)], timeout + 2, null, false).then(function(r) {
       if (r.code === 127) return root.cappedXhr(url, timeout, cap)
       var text = r.out || ""
