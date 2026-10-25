@@ -290,9 +290,9 @@ assert.ok(written.indexOf("accent = \"#ea7070\"") >= 0);
 
 var engineSrc = fs.readFileSync(path.join(root, "js/engine.js"), "utf8");
 assert.equal(engineSrc.indexOf("idat.push"), -1);
-assert.equal(JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).version, "2.1.0");
+assert.equal(JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).version, "2.2.0");
 for (var file of ["EngineHost.qml", "js/node-host.mjs", "js/engine.js", "manifest.json"]) {
-  assert.equal(fs.readFileSync(path.join(root, file), "utf8").indexOf("2.0.4"), -1, file);
+  assert.equal(fs.readFileSync(path.join(root, file), "utf8").indexOf("2.1.0"), -1, file);
 }
 
 console.log("png bounds tests passed");

@@ -20,6 +20,6 @@ QtObject {
       if (cur.length) args.push(cur)
     }
     Cycle.setHost(hostItem.api)
-    Cycle.main(args).then(function(code) { Qt.exit(code || 0) }, function() { Qt.exit(1) })
+    Cycle.main(args).then(function(code) { Qt.exit(code || 0) }, function(e) { console.log("cycle: " + (e && e.message ? e.message : e)); Qt.exit(1) })
   }
 }

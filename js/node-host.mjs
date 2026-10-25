@@ -62,11 +62,13 @@ export function createNodeHost(opts) {
       try { return fs.readFileSync(p, "utf8"); } catch (e) { return null; }
     },
     writeFile: async function(p, body) {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      var tmp = p + ".tmp";
-      fs.writeFileSync(tmp, body);
-      fs.renameSync(tmp, p);
-      return true;
+      try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        var tmp = p + ".tmp";
+        fs.writeFileSync(tmp, body);
+        fs.renameSync(tmp, p);
+        return true;
+      } catch (e) { return false; }
     },
     removeFile: async function(p) { try { fs.rmSync(p, { force: true }); } catch (e) {} return true; },
     exists: async function(p) { try { return fs.existsSync(p); } catch (e) { return false; } },
@@ -102,12 +104,16 @@ export function createNodeHost(opts) {
     },
     exec: function(args, timeout, env) { return run(args, timeout, env); },
     execLong: function(args, timeout, env) { return run(args, timeout, env); },
-    spawnDetached: async function(args) {
-      try {
-        var child = spawn(args[0], args.slice(1), { detached: true, stdio: "ignore" });
-        child.unref();
-        return true;
-      } catch (e) { return false; }
+    // A missing program raises an asynchronous error on the child; without a
+    // listener that error would end the whole process.
+    spawnDetached: function(args) {
+      return new Promise(function(resolve) {
+        try {
+          var child = spawn(args[0], args.slice(1), { detached: true, stdio: "ignore" });
+          child.on("error", function() { resolve(false); });
+          child.on("spawn", function() { child.unref(); resolve(true); });
+        } catch (e) { resolve(false); }
+      });
     },
     fetchText: async function(url, timeoutSec, maxBytes) {
       var u = String(url || "");
@@ -118,7 +124,7 @@ export function createNodeHost(opts) {
       }
       var timeout = Math.max(1, timeoutSec || 8);
       var cap = Math.max(1, maxBytes || 8192);
-      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.1.0 --output - -- \"$3\" | head -c \"$2\"";
+      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.2.0 --output - -- \"$3\" | head -c \"$2\"";
       var r = await run(["bash", "-c", script, "bash", String(timeout), String(cap), u], timeout + 2, null);
       var text = r.out || "";
       if (text.length > cap) text = text.slice(0, cap);

@@ -7,6 +7,11 @@ import "js/engine.js" as Cycle
 Item {
   id: root
   property string noteText: ""
+  property bool noteError: false
+  property string busyLabel: ""
+  property double busySince: 0
+  property string confirmDelete: ""
+  property int previewSeq: 0
   property var curveData: null
   property var liveData: null
   property var settingsData: null
@@ -20,7 +25,41 @@ Item {
   function ensureHost() {
     if (!Cycle.isArmed()) Cycle.arm(engineHost.api)
   }
-  function note(msg) { root.noteText = String(msg) }
+  function note(msg) { root.noteText = String(msg); root.noteError = false }
+  function fail(msg) { root.noteText = String(msg); root.noteError = true }
+  function errorText(e) { return e && e.message ? String(e.message) : String(e) }
+  function catchFail(label) { return function(e) { fail(label + " failed: " + errorText(e)) } }
+  // One long job at a time. The note counts the seconds, and an error ends the
+  // job with its message instead of leaving the note stuck on the first line.
+  function runJob(label, start, done) {
+    if (root.busyLabel) { fail(root.busyLabel + " is still running"); return }
+    root.busyLabel = label
+    root.busySince = Date.now()
+    note(label + "\u2026")
+    var job
+    try { job = start() } catch (e) { root.busyLabel = ""; fail(label + " failed: " + errorText(e)); return }
+    Promise.resolve(job).then(function(result) {
+      root.busyLabel = ""
+      done(result)
+    }, function(e) {
+      root.busyLabel = ""
+      fail(label + " failed: " + errorText(e))
+    })
+  }
+  function generationDone(rc) {
+    if (rc === 0) note("Wallpaper generated and applied")
+    else if (rc === 3) fail("Another generation is already running")
+    else fail("Generation failed \u2013 kept the current wallpaper")
+  }
+  function presetProblem() {
+    if (presetBrightOn.checked) {
+      var b = parseInt(presetBright.text, 10)
+      if (!/^\d+$/.test(presetBright.text.trim()) || b < 1 || b > 100) return "Brightness must be 1\u2013100"
+    }
+    var w = parseInt(presetWarmth.text, 10)
+    if (isNaN(w) || w < 1000 || w > 10000) return "Warmth must be 1000\u201310000 K"
+    return ""
+  }
   function tabIndex(name) {
     if (name === "data") return 1
     if (name === "prompt") return 2
@@ -224,6 +263,7 @@ Item {
       root.filling = true
       genProviderBox.currentIndex = Math.max(0, Cycle.providerNames().indexOf(Cycle.genProvider(s.generator)))
       root.filling = false
+      providerHint.text = Cycle.providerHint(Cycle.genProvider(s.generator))
       genCommand.text = (s.generator && s.generator.command) || Cycle.providerCommand(Cycle.genProvider(s.generator))
       genTimeout.text = String((s.generator && s.generator.timeout) || 1200)
       schedFrom.text = String(s.schedule && typeof s.schedule.from === "number" ? s.schedule.from : 6)
@@ -325,11 +365,23 @@ Item {
     }
   }
 
+  component Field: TextField {
+    color: "#f2efe9"
+    placeholderTextColor: "#a8a39a"
+  }
+
   EngineHost {
     id: engineHost
-    onMinute: function() { Cycle.tick(false) }
+    onMinute: function() { Cycle.tick(false).then(null, function(e) { console.log("cycle: tick failed: " + root.errorText(e)) }) }
   }
   Component.onCompleted: ensureHost()
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.busyLabel !== ""
+    onTriggered: root.note(root.busyLabel + "\u2026 " + Math.floor((Date.now() - root.busySince) / 1000) + " s")
+  }
+  Timer { id: confirmTimer; interval: 5000; onTriggered: root.confirmDelete = "" }
 
   FloatingWindow {
     id: window
@@ -418,7 +470,7 @@ Item {
                 id: engineSwitch
                 onToggled: {
                   if (root.filling) return
-                  Cycle.setEngine(checked).then(function() { root.note(checked ? "Engine on" : "Engine off"); reloadNow() })
+                  Cycle.setEngine(checked).then(function() { root.note(checked ? "Engine on" : "Engine off"); reloadNow() }, catchFail("Saving"))
                 }
               }
             }
@@ -441,14 +493,13 @@ Item {
             RowLayout {
               Button {
                 text: "Apply now"
-                onClicked: Cycle.tick(true).then(function() { root.note("Applied"); reloadNow() })
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Applying the current slot", function() { return Cycle.tick(true) }, function() { note("Applied"); reloadNow() })
               }
               Button {
                 text: "Generate"
-                onClicked: {
-                  root.note("Generating wallpaper from live data")
-                  Cycle.generateAt(false, null, null).then(function() { root.note("Generation finished"); reload() })
-                }
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Generating a wallpaper from live data", function() { return Cycle.generateAt(false, null, null) }, function(rc) { generationDone(rc); reload() })
               }
             }
             Label { text: "Resolution"; color: "#f2efe9"; font.bold: true }
@@ -468,15 +519,16 @@ Item {
               Label { text: "Live data"; color: "#f2efe9"; font.bold: true }
               Button {
                 text: "Refresh"
-                onClicked: Cycle.refreshLive().then(function(d) { root.liveData = d; paintLive(d); root.note("Live data refreshed") })
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Refreshing live data", function() { return Cycle.refreshLive() }, function(d) { root.liveData = d; paintLive(d); note("Live data refreshed") })
               }
             }
             Label { id: liveText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#f2efe9" }
             Label { text: "RSS feeds"; color: "#f2efe9"; font.bold: true }
             Label { id: feedList; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
-            TextField { id: feedIndex; placeholderText: "Index to edit (blank = new)"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
-            TextField { id: feedName; placeholderText: "Name"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
-            TextField { id: feedUrl; placeholderText: "Feed address"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
+            Field { id: feedIndex; placeholderText: "Index to edit (blank = new)"; width: parent.width; validator: IntValidator { bottom: 0; top: 999 } }
+            Field { id: feedName; placeholderText: "Name"; width: parent.width }
+            Field { id: feedUrl; placeholderText: "Feed address"; width: parent.width }
             Switch { id: feedEnabled; text: "Enabled"; checked: true }
             RowLayout {
               Button {
@@ -484,7 +536,7 @@ Item {
                 onClicked: {
                   var idx = parseInt(feedIndex.text, 10)
                   var feeds = (root.settingsData && root.settingsData.feeds) || []
-                  if (isNaN(idx) || idx < 0 || idx >= feeds.length) { root.note("No feed at that index"); return }
+                  if (isNaN(idx) || idx < 0 || idx >= feeds.length) { fail("No feed at that index"); return }
                   root.feedEdit = idx
                   feedName.text = feeds[idx].name || ""
                   feedUrl.text = feeds[idx].url || ""
@@ -495,7 +547,7 @@ Item {
                 text: "Save feed"
                 onClicked: {
                   var url = feedUrl.text.trim()
-                  if (url.indexOf("http") !== 0) { root.note("Enter an http(s) feed address"); return }
+                  if (!Cycle.isHttpsUrl(url)) { fail("Feed addresses must start with https://"); return }
                   var name = feedName.text.trim() || url
                   var idx = feedIndex.text.trim() === "" ? -1 : parseInt(feedIndex.text, 10)
                   var on = feedEnabled.checked
@@ -513,7 +565,7 @@ Item {
                   Cycle.updateSettings(function(s) {
                     if (!s.feeds) return
                     if (!isNaN(idx) && idx >= 0 && idx < s.feeds.length) s.feeds.splice(idx, 1)
-                  }).then(function() { root.note("Feed removed"); reloadSettings() })
+                  }).then(function() { root.note("Feed removed"); reloadSettings() }, catchFail("Saving"))
                 }
               }
             }
@@ -558,14 +610,12 @@ Item {
               Button {
                 text: "Use"
                 enabled: root.editingId !== "" && root.editingId !== root.activeId
-                onClicked: Cycle.setActivePrompt(root.editingId).then(function() { return Cycle.syncMenu() }).then(function() { root.note("Active prompt: " + root.editingId); reloadPrompts() })
+                onClicked: Cycle.setActivePrompt(root.editingId).then(function() { return Cycle.syncMenu() }).then(function() { root.note("Active prompt: " + root.editingId); reloadPrompts() }, catchFail("Saving"))
               }
               Button {
                 text: "Generate"
-                onClicked: {
-                  root.note("Generating from " + (root.editingId || "the active prompt"))
-                  Cycle.generateAt(false, root.editingId || null, null).then(function() { root.note("Generation finished") })
-                }
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Generating from " + (root.editingId || "the active prompt"), function() { return Cycle.generateAt(false, root.editingId || null, null) }, function(rc) { generationDone(rc); reloadSchedule() })
               }
               Button {
                 text: "Duplicate"
@@ -592,6 +642,13 @@ Item {
                 enabled: root.editingId !== "" && root.editingId !== root.activeId
                 onClicked: {
                   var id = root.editingId
+                  if (root.confirmDelete !== id) {
+                    root.confirmDelete = id
+                    confirmTimer.restart()
+                    fail("Press Delete again within 5 s to remove '" + id + "'")
+                    return
+                  }
+                  root.confirmDelete = ""
                   Cycle.deletePrompt(id).then(function() {
                     return Cycle.updateSettings(function(s) { if (s.schedules) delete s.schedules[id] })
                   }).then(function() { return Cycle.syncMenu() }).then(function() {
@@ -604,9 +661,9 @@ Item {
               Button { text: "Schedule\u2026"; onClicked: tabs.currentIndex = 3 }
             }
             Label { text: "Title"; color: "#a8a39a" }
-            TextField { id: titleField; width: parent.width; color: "#f2efe9" }
+            Field { id: titleField; width: parent.width }
             Label { text: "Id"; color: "#a8a39a" }
-            TextField { id: idField; width: parent.width; color: "#f2efe9" }
+            Field { id: idField; width: parent.width }
             ScrollView {
               width: parent.width
               height: 160
@@ -649,10 +706,11 @@ Item {
               text: "Save"
               onClicked: {
                 var nn = Cycle.safeName(idField.text)
-                if (!nn) { root.note("Give the prompt an id"); return }
+                if (!nn) { fail("Give the prompt an id"); return }
                 var old = root.editingId
                 var body = promptEdit.text
-                Cycle.savePrompt(nn, body).then(function() {
+                Cycle.savePrompt(nn, body).then(function(ok) {
+                  if (!ok) throw new Error("could not write " + nn + ".txt")
                   if (old && old !== nn) {
                     return Cycle.deletePrompt(old).then(function() {
                       if (root.activeId === old) return Cycle.setActivePrompt(nn)
@@ -672,18 +730,25 @@ Item {
                     var errs = Cycle.promptErrors(body, (root.settingsData && root.settingsData.images) ? root.settingsData.images.length : 0)
                     root.note(errs.length ? ("Saved " + nn + " \u2013 " + errs.length + " error(s)") : ("Saved " + nn))
                     reloadPrompts()
-                  })
+                  }, catchFail("Saving the prompt"))
               }
             }
             Label { text: "Live preview"; color: "#f2efe9"; font.bold: true }
             Label { id: previewLabel; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            // A preview can look up cities and weather, so it waits for a pause in
+            // typing, and an older preview never overwrites a newer one.
             Timer {
               id: previewTimer
-              interval: 500
+              interval: 1200
               repeat: false
               onTriggered: {
                 var text = promptEdit.text
-                Cycle.settings().then(function(s) { return Cycle.expandPlaceholders(text, s) }).then(function(out) { previewLabel.text = out })
+                var seq = ++root.previewSeq
+                Cycle.settings().then(function(s) { return Cycle.expandPlaceholders(text, s) }).then(function(out) {
+                  if (seq === root.previewSeq) previewLabel.text = out
+                }, function(e) {
+                  if (seq === root.previewSeq) previewLabel.text = "Preview failed: " + errorText(e)
+                })
               }
             }
           }
@@ -709,8 +774,8 @@ Item {
               text: "Save schedule"
               onClicked: {
                 var name = schedPrompt.currentText
-                if (!name) { root.note("Create a prompt first"); return }
-                Cycle.saveSchedule(name, currentSchedule()).then(function() { root.note("Schedule saved"); reloadSchedule() })
+                if (!name) { fail("Create a prompt first"); return }
+                Cycle.saveSchedule(name, currentSchedule()).then(function() { root.note("Schedule saved"); reloadSchedule() }, catchFail("Saving"))
               }
             }
           }
@@ -726,10 +791,10 @@ Item {
             spacing: 8
             Label { id: sunToday; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             Label { text: "Phase boundaries"; color: "#f2efe9"; font.bold: true }
-            TextField { id: phaseMorning; placeholderText: "Morning starts at"; width: parent.width; color: "#f2efe9" }
-            TextField { id: phaseAfternoon; placeholderText: "Afternoon starts at"; width: parent.width; color: "#f2efe9" }
-            TextField { id: phaseEvening; placeholderText: "Evening starts at"; width: parent.width; color: "#f2efe9" }
-            TextField { id: phaseNight; placeholderText: "Night starts at"; width: parent.width; color: "#f2efe9" }
+            Field { id: phaseMorning; placeholderText: "Morning starts at"; width: parent.width }
+            Field { id: phaseAfternoon; placeholderText: "Afternoon starts at"; width: parent.width }
+            Field { id: phaseEvening; placeholderText: "Evening starts at"; width: parent.width }
+            Field { id: phaseNight; placeholderText: "Night starts at"; width: parent.width }
             Button {
               text: "Save phases"
               onClicked: {
@@ -737,13 +802,13 @@ Item {
                 var fields = [phaseMorning.text.trim(), phaseAfternoon.text.trim(), phaseEvening.text.trim(), phaseNight.text.trim()]
                 for (var i = 0; i < fields.length; i++) {
                   if (names.indexOf(fields[i]) < 0 && !/^\d{1,2}:\d{2}$/.test(fields[i])) {
-                    root.note("Use a sun event or HH:MM")
+                    fail("Use a sun event or HH:MM")
                     return
                   }
                 }
                 Cycle.updateSettings(function(s) {
                   s.times = { morning: fields[0], afternoon: fields[1], evening: fields[2], night: fields[3] }
-                }).then(function() { root.note("Saved"); reloadSettings() })
+                }).then(function() { root.note("Saved"); reloadSettings() }, catchFail("Saving"))
               }
             }
             Label { text: "Day type"; color: "#f2efe9"; font.bold: true }
@@ -751,19 +816,19 @@ Item {
               id: weekdayBox
               width: parent.width
               model: []
-              onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekday = weekdayBox.currentText }).then(function() { root.note("Saved") }) }
+              onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekday = weekdayBox.currentText }).then(function() { root.note("Saved") }, catchFail("Saving")) }
             }
             PlainCombo {
               id: weekendBox
               width: parent.width
               model: []
-              onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekend = weekendBox.currentText }).then(function() { root.note("Saved") }) }
+              onActivated: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.cycles) s.cycles = {}; s.cycles.weekend = weekendBox.currentText }).then(function() { root.note("Saved") }, catchFail("Saving")) }
             }
             Label { text: "Location"; color: "#f2efe9"; font.bold: true }
             Label { id: locStatus; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
-            TextField { id: locName; placeholderText: "Name"; width: parent.width; color: "#f2efe9" }
-            TextField { id: locLat; placeholderText: "Latitude"; width: parent.width; color: "#f2efe9" }
-            TextField { id: locLon; placeholderText: "Longitude"; width: parent.width; color: "#f2efe9" }
+            Field { id: locName; placeholderText: "Name"; width: parent.width }
+            Field { id: locLat; placeholderText: "Latitude"; width: parent.width }
+            Field { id: locLon; placeholderText: "Longitude"; width: parent.width }
             RowLayout {
               Button {
                 text: "Save location"
@@ -772,29 +837,25 @@ Item {
                   var lon = parseFloat(locLon.text)
                   var name = locName.text.trim()
                   if (!name || isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-                    root.note("Enter a name, latitude, and longitude")
+                    fail("Enter a name, a latitude from -90 to 90, and a longitude from -180 to 180")
                     return
                   }
                   Cycle.updateSettings(function(s) {
                     var prev = s.location || {}
-                    s.location = { name: name, city: name, cc: prev.cc || "", lat: lat, lon: lon, tz: prev.tz || "", source: "manual" }
-                  }).then(function() { root.note("Saved"); reloadSettings() })
+                    // The saved zone belongs to the old coordinates. Open-Meteo derives one from the new ones when it is empty.
+                    var moved = !(typeof prev.lat === "number" && typeof prev.lon === "number" && Math.abs(prev.lat - lat) < 0.01 && Math.abs(prev.lon - lon) < 0.01)
+                    s.location = { name: name, city: name, cc: prev.cc || "", lat: lat, lon: lon, tz: moved ? "" : (prev.tz || ""), source: "manual" }
+                  }).then(function() { root.note("Saved"); reloadSettings() }, catchFail("Saving"))
                 }
               }
               Button {
                 text: "Detect location"
-                onClicked: {
-                  root.note("Detecting location")
-                  Cycle.redetectLocation().then(function(r) {
-                    if (!r || !r.ok) {
-                      root.note((r && r.error) || "location unknown, set it in Settings")
-                      reloadSettings()
-                      return
-                    }
-                    root.note("Location detected")
-                    reloadSettings()
-                  })
-                }
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Detecting location", function() { return Cycle.redetectLocation() }, function(r) {
+                  if (!r || !r.ok) fail((r && r.error) || "location unknown, set it in Settings")
+                  else note("Location detected")
+                  reloadSettings()
+                })
               }
             }
             Label { id: wifiLabel; textFormat: Text.PlainText; color: "#a8a39a"; wrapMode: Text.WordWrap; width: parent.width }
@@ -802,21 +863,21 @@ Item {
             Button {
               text: "Map current Wi-Fi"
               onClicked: Cycle.wifiSsid().then(function(ssid) {
-                if (!ssid) { root.note("No Wi-Fi network"); return }
+                if (!ssid) { fail("No Wi-Fi network"); return }
                 var cycle = wifiCycle.currentText
-                return Cycle.updateSettings(function(s) { if (!s.wifi) s.wifi = {}; s.wifi[ssid] = cycle }).then(function() { root.note("Mapped " + ssid); reloadSettings() })
+                return Cycle.updateSettings(function(s) { if (!s.wifi) s.wifi = {}; s.wifi[ssid] = cycle }).then(function() { root.note("Mapped " + ssid); reloadSettings() }, catchFail("Saving"))
               })
             }
             Label { text: "Weather rules"; color: "#f2efe9"; font.bold: true }
             Switch {
               id: weatherOn
               text: "Use weather rules"
-              onToggled: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.weather) s.weather = {}; s.weather.enabled = weatherOn.checked }).then(function() { root.note("Saved") }) }
+              onToggled: { if (!root.filling) Cycle.updateSettings(function(s) { if (!s.weather) s.weather = {}; s.weather.enabled = weatherOn.checked }).then(function() { root.note("Saved") }, catchFail("Saving")) }
             }
             Label { id: rulesText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
-            TextField { id: ruleIndex; placeholderText: "Rule index"; text: "0"; width: parent.width; color: "#f2efe9" }
-            TextField { id: ruleWhen; placeholderText: "Condition, e.g. temperature >= 40"; width: parent.width; color: "#f2efe9" }
-            TextField { id: rulePreset; placeholderText: "Preset id"; width: parent.width; color: "#f2efe9" }
+            Field { id: ruleIndex; placeholderText: "Rule index"; text: "0"; width: parent.width; validator: IntValidator { bottom: 0; top: 999 } }
+            Field { id: ruleWhen; placeholderText: "Condition, e.g. temperature >= 40"; width: parent.width }
+            Field { id: rulePreset; placeholderText: "Preset id"; width: parent.width }
             Switch { id: ruleGenerate; text: "Generate wallpaper with this rule" }
             RowLayout {
               Button {
@@ -824,7 +885,7 @@ Item {
                 onClicked: {
                   var idx = parseInt(ruleIndex.text, 10) || 0
                   var rules = (root.settingsData && root.settingsData.weather && root.settingsData.weather.rules) || []
-                  if (idx < 0 || idx >= rules.length) { root.note("No rule at that index"); return }
+                  if (idx < 0 || idx >= rules.length) { fail("No rule at that index"); return }
                   ruleWhen.text = rules[idx].when || ""
                   rulePreset.text = rules[idx].preset || ""
                   ruleGenerate.checked = !!rules[idx].generate
@@ -842,52 +903,60 @@ Item {
                     if (when.trim()) s.weather.rules[idx].when = when.trim()
                     if (preset) s.weather.rules[idx].preset = preset
                     s.weather.rules[idx].generate = gen
-                  }).then(function() { root.note("Saved"); reloadSettings() })
+                  }).then(function() { root.note("Saved"); reloadSettings() }, catchFail("Saving"))
                 }
               }
             }
             Label { text: "Generation"; color: "#f2efe9"; font.bold: true }
             Label { text: "Night window hours (from / to). Placeholders: {{location}} {{temperature}} {{condition}} {{phase}} and {prompt_q} {out}. Grok and custom commands write the PNG; Claude, Codex, Gemini and Copilot run without tools and reply with SVG that Cycle renders (needs rsvg-convert from librsvg)."; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
-            TextField { id: schedFrom; placeholderText: "From hour"; width: parent.width; color: "#f2efe9" }
-            TextField { id: schedTo; placeholderText: "To hour"; width: parent.width; color: "#f2efe9" }
-            TextField { id: genTemplate; placeholderText: "Prompt template"; width: parent.width; color: "#f2efe9" }
+            Field { id: schedFrom; placeholderText: "From hour (0\u201323)"; width: parent.width; validator: IntValidator { bottom: 0; top: 23 } }
+            Field { id: schedTo; placeholderText: "To hour (0\u201323)"; width: parent.width; validator: IntValidator { bottom: 0; top: 23 } }
+            Field { id: genTemplate; placeholderText: "Prompt template"; width: parent.width }
             PlainCombo {
               id: genProviderBox
               width: parent.width
               model: Cycle.providerLabels()
               onActivated: {
                 if (root.filling) return
-                var cmd = Cycle.providerCommand(Cycle.providerNames()[currentIndex])
+                var name = Cycle.providerNames()[currentIndex]
+                var cmd = Cycle.providerCommand(name)
                 if (cmd) genCommand.text = cmd
+                providerHint.text = Cycle.providerHint(name)
               }
             }
-            TextField { id: genCommand; placeholderText: "Generator command"; width: parent.width; color: "#f2efe9" }
-            TextField { id: genTimeout; placeholderText: "Timeout seconds"; width: parent.width; color: "#f2efe9" }
+            Label { id: providerHint; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Field { id: genCommand; placeholderText: "Generator command"; width: parent.width }
+            Field { id: genTimeout; placeholderText: "Timeout seconds (1200 or more is used)"; width: parent.width; validator: IntValidator { bottom: 1; top: 86400 } }
             RowLayout {
               Button {
                 text: "Save generation"
-                onClicked: Cycle.updateSettings(function(s) {
-                  if (!s.generator) s.generator = {}
-                  s.generator.provider = Cycle.providerNames()[genProviderBox.currentIndex] || "grok"
-                  s.generator.template = genTemplate.text
-                  s.generator.command = genCommand.text
-                  var to = parseInt(genTimeout.text, 10)
-                  s.generator.timeout = isNaN(to) ? 1200 : to
-                  if (!s.schedule) s.schedule = {}
-                  s.schedule.from = parseInt(schedFrom.text, 10) || 0
-                  s.schedule.to = parseInt(schedTo.text, 10) || 0
-                }).then(function() { root.note("Saved") })
+                onClicked: {
+                  var timeout = parseInt(genTimeout.text, 10)
+                  var from = parseInt(schedFrom.text, 10)
+                  var until = parseInt(schedTo.text, 10)
+                  if (isNaN(timeout) || timeout < 1) { fail("Timeout must be a number of seconds"); return }
+                  if (isNaN(from) || isNaN(until) || from < 0 || from > 23 || until < 0 || until > 23) { fail("Window hours must be 0\u201323"); return }
+                  if (from > until) { fail("The window must start before it ends"); return }
+                  Cycle.updateSettings(function(s) {
+                    if (!s.generator) s.generator = {}
+                    s.generator.provider = Cycle.providerNames()[genProviderBox.currentIndex] || "grok"
+                    s.generator.template = genTemplate.text
+                    s.generator.command = genCommand.text
+                    s.generator.timeout = timeout
+                    if (!s.schedule) s.schedule = {}
+                    s.schedule.from = from
+                    s.schedule.to = until
+                  }).then(function() { root.note("Saved") }, catchFail("Saving"))
+                }
               }
               Button {
                 text: "Test generation"
-                onClicked: {
-                  root.note("Generating\u2026")
-                  Cycle.settings().then(function(s) {
-                    return Cycle.resolveState(true).then(function(res) {
-                      return Cycle.generateImage("test", Cycle.themeContext(res), s)
-                    })
-                  }).then(function(path) { root.note(path ? ("Wrote " + path) : "Generation failed") })
-                }
+                enabled: root.busyLabel === ""
+                onClicked: runJob("Test generation", function() {
+                  return Cycle.settings().then(function(s) {
+                    return Cycle.resolveState(true).then(function(res) { return Cycle.generateImage("test", Cycle.themeContext(res), s) })
+                  })
+                }, function(path) { if (path) note("Wrote " + path); else fail("Generation failed \u2013 the shell log has the reason") })
               }
             }
             Label { text: "Preset values"; color: "#f2efe9"; font.bold: true }
@@ -897,21 +966,31 @@ Item {
               model: []
               onActivated: { if (!root.filling) loadPreset(currentText) }
             }
-            TextField { id: presetTheme; placeholderText: "Theme (empty keeps current)"; width: parent.width; color: "#f2efe9" }
-            TextField { id: presetWallpaper; placeholderText: "Wallpaper path"; width: parent.width; color: "#f2efe9" }
+            Field { id: presetTheme; placeholderText: "Theme (empty keeps current)"; width: parent.width }
+            Field { id: presetWallpaper; placeholderText: "Wallpaper path"; width: parent.width }
             Switch { id: presetBrightOn; text: "Set brightness" }
-            TextField { id: presetBright; placeholderText: "Brightness %"; width: parent.width; color: "#f2efe9" }
+            Field { id: presetBright; placeholderText: "Brightness % (1\u2013100)"; width: parent.width; validator: IntValidator { bottom: 1; top: 100 } }
             Switch { id: presetNight; text: "Night Shift" }
-            TextField { id: presetWarmth; placeholderText: "Warmth (K)"; width: parent.width; color: "#f2efe9" }
+            Field { id: presetWarmth; placeholderText: "Warmth (1000\u201310000 K)"; width: parent.width; validator: IntValidator { bottom: 1000; top: 10000 } }
             ComboBox { id: darkBox; width: parent.width; model: ["Appearance: keep", "Dark", "Light"] }
             RowLayout {
-              Button { text: "Try"; onClicked: Cycle.applyPreset(presetPayload()).then(function() { root.note("Applied") }) }
+              Button {
+                text: "Try"
+                enabled: root.busyLabel === ""
+                onClicked: {
+                  var why = presetProblem()
+                  if (why) { fail(why); return }
+                  runJob("Applying the preset", function() { return Cycle.applyPreset(presetPayload()) }, function() { note("Applied") })
+                }
+              }
               Button {
                 text: "Save preset"
                 onClicked: {
                   var name = presetBox.currentText
                   if (!name) return
-                  Cycle.savePreset(name, presetPayload()).then(function() { root.note("Saved " + name) })
+                  var why = presetProblem()
+                  if (why) { fail(why); return }
+                  Cycle.savePreset(name, presetPayload()).then(function(ok) { if (ok) note("Saved " + name); else fail("Could not write the preset " + name) }, catchFail("Saving"))
                 }
               }
               Button {
@@ -919,19 +998,25 @@ Item {
                 onClicked: {
                   var name = presetBox.currentText
                   if (!name) return
-                  Cycle.setHold(name).then(function() { root.note("Holding " + name); reloadNow() })
+                  Cycle.setHold(name).then(function() { root.note("Holding " + name); reloadNow() }, catchFail("Saving"))
                 }
               }
             }
-            TextField { id: newPresetName; placeholderText: "New preset id"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
+            Field { id: newPresetName; placeholderText: "New preset id"; width: parent.width }
             Button {
               text: "Create preset"
               onClicked: {
                 var name = Cycle.safeName(newPresetName.text)
-                if (!name) return
+                if (!name) { fail("Give the preset an id"); return }
+                var why = presetProblem()
+                if (why) { fail(why); return }
                 var body = presetPayload()
                 body.label = name
-                Cycle.savePreset(name, body).then(function() { root.note("Created " + name); reloadSettings() })
+                Cycle.savePreset(name, body).then(function(ok) {
+                  if (!ok) { fail("Could not write the preset " + name); return }
+                  note("Created " + name)
+                  reloadSettings()
+                }, catchFail("Saving"))
               }
             }
             Label { text: "Cycle phases"; color: "#f2efe9"; font.bold: true }
@@ -950,19 +1035,20 @@ Item {
                   if (!c.phases) c.phases = {}
                   c.phases[phase] = preset
                   return Cycle.saveCycle(name, c)
-                }).then(function() { root.note(name + ": " + phase + " \u2192 " + preset) })
+                }).then(function(ok) { if (ok) note(name + ": " + phase + " \u2192 " + preset); else fail("Could not write the cycle " + name) }, catchFail("Saving"))
               }
             }
-            TextField { id: newCycleName; placeholderText: "New cycle id"; width: parent.width; color: "#f2efe9"; placeholderTextColor: "#a8a39a" }
+            Field { id: newCycleName; placeholderText: "New cycle id"; width: parent.width }
             Button {
               text: "Create cycle"
               onClicked: {
                 var name = Cycle.safeName(newCycleName.text)
-                if (!name) return
-                Cycle.saveCycle(name, { label: name, phases: { morning: "day", afternoon: "day", evening: "evening", night: "night" } }).then(function() {
-                  root.note("Created " + name)
+                if (!name) { fail("Give the cycle an id"); return }
+                Cycle.saveCycle(name, { label: name, phases: { morning: "day", afternoon: "day", evening: "evening", night: "night" } }).then(function(ok) {
+                  if (!ok) { fail("Could not write the cycle " + name); return }
+                  note("Created " + name)
                   reloadSettings()
-                })
+                }, catchFail("Saving"))
               }
             }
           }
@@ -973,7 +1059,7 @@ Item {
         Layout.fillWidth: true
         text: root.noteText
         textFormat: Text.PlainText
-        color: "#e0a050"
+        color: root.noteError ? "#e06c75" : "#e0a050"
         elide: Text.ElideRight
       }
     }
