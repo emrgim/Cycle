@@ -61,13 +61,19 @@ var PNG_MAX_BYTES = 48 * 1024 * 1024;
 var PNG_MAX_DIM = 8192;
 var PNG_MAX_PIXELS = 3840 * 2160 * 2;
 var PNG_MAX_RAW = 40 * 1024 * 1024;
-// Image providers. Grok and a custom command write the PNG themselves. Claude has
-// no image tool, so it runs with no tools and no MCP servers and replies with SVG
-// text that Cycle checks and renders: a hostile headline cannot reach a shell.
-var PROVIDER_NAMES = ["grok", "claude", "custom"];
+// Image providers. Grok and a custom command write the PNG themselves. The other
+// agents run with every tool switched off (no shell, files, web or MCP) and reply
+// with SVG text that Cycle checks and renders: a hostile headline cannot reach a shell.
+// Gemini reads its no-tools rule from a policy file and silently keeps its tools
+// when that file is missing, so its command refuses to start without it.
+var GEMINI_POLICY = "\"$CYCLE_PLUGIN/policies/gemini-no-tools.toml\"";
+var PROVIDER_NAMES = ["grok", "claude", "codex", "gemini", "copilot", "custom"];
 var PROVIDERS = {
   grok: { label: "Grok", command: "grok -p {prompt_q} --always-approve --output-format json", output: "png" },
   claude: { label: "Claude", command: "claude -p {prompt_q} --tools \"\" --strict-mcp-config --output-format json --no-session-persistence < /dev/null", output: "svg" },
+  codex: { label: "Codex", command: "codex exec --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable shell_tool --disable unified_exec --disable apps --disable plugins --disable image_generation -c web_search=disabled --color never {prompt_q} < /dev/null", output: "svg" },
+  gemini: { label: "Gemini", command: "test -f " + GEMINI_POLICY + " && gemini -p {prompt_q} --skip-trust --admin-policy " + GEMINI_POLICY + " -e none -o json < /dev/null", output: "svg" },
+  copilot: { label: "Copilot", command: "copilot -p {prompt_q} --available-tools none --disable-builtin-mcps --no-custom-instructions --no-ask-user --no-color -s < /dev/null", output: "svg" },
   custom: { label: "Custom", command: "", output: "png" }
 };
 // The SVG reaches the renderer as one environment value, which Linux caps at 128 KiB.
@@ -229,7 +235,8 @@ function stateDir() {
 function genDir() { return join(home(), ".local/share/cycle/generated"); }
 function themeDir() { return join(home(), ".config/omarchy/themes/cycle"); }
 function dispBin() { return join(home(), ".local/bin/omarchy-display"); }
-function pluginBin() { return join(host.pluginRoot || join(home(), ".config/omarchy/plugins/emrgim.cycle"), "bin/cycle"); }
+function pluginDir() { return host.pluginRoot || join(home(), ".config/omarchy/plugins/emrgim.cycle"); }
+function pluginBin() { return join(pluginDir(), "bin/cycle"); }
 function nowTs() { return Date.now() / 1000; }
 function log(s) { if (host && host.log) host.log(String(s)); }
 function logErr(s) { if (host && host.logErr) host.logErr(String(s)); }
@@ -257,7 +264,7 @@ function defaultSettings() {
       template: "A wide 16:9 desktop wallpaper of {{location}} in the {{phase}}, {{condition}}, {{temperature}}\u00b0C, city skyline, cinematic, minimal, no text",
       command: PROVIDERS.grok.command,
       timeout: 1200,
-      note: "provider: grok | claude | custom. Grok and custom commands must write a PNG to {out}; Claude replies with SVG that Cycle renders. {prompt} / {prompt_q} = filled prompt, {out} = target path."
+      note: "provider: grok | claude | codex | gemini | copilot | custom. Grok and custom commands must write a PNG to {out}; Claude, Codex, Gemini and Copilot reply with SVG that Cycle renders. {prompt} / {prompt_q} = filled prompt, {out} = target path, $CYCLE_PLUGIN = plugin folder."
     },
     feeds: [{ name: "Google News", url: TOP_FEED, enabled: true }],
     schedule: { from: 6, to: 18 }
@@ -536,36 +543,46 @@ function buildGenCommand(tpl) {
   });
 }
 function providerNames() { return PROVIDER_NAMES.slice(); }
+function providerLabels() { return PROVIDER_NAMES.map(function(n) { return PROVIDERS[n].label; }); }
 function providerCommand(name) { return hasKey(PROVIDERS, name) ? PROVIDERS[name].command : ""; }
-// Settings written before providers existed have only a command; read the provider from it.
+// Settings without a provider read it from the program the command runs.
 function genProvider(g) {
   var p = g && typeof g.provider === "string" ? g.provider.toLowerCase() : "";
   if (hasKey(PROVIDERS, p)) return p;
-  var first = String((g && g.command) || "").trim().split(/\s+/)[0];
+  var words = String((g && g.command) || "").trim().split(/\s+/);
+  if (words[0] === "test" && words.indexOf("&&") > 0) words = words.slice(words.indexOf("&&") + 1);
+  var first = words[0] || "";
   var base = first.slice(first.lastIndexOf("/") + 1);
-  if (base === "claude") return "claude";
-  if (!first || base === "grok") return "grok";
+  if (base !== "custom" && hasKey(PROVIDERS, base)) return base;
+  if (!first) return "grok";
   return "custom";
 }
 function genInstructions(prov, out) {
   if (PROVIDERS[prov].output === "svg") {
-    return ". Paint this as one standalone SVG wallpaper with viewBox=\"0 0 1920 1080\" (16:9) that fills the whole canvas edge to edge. Build depth, light and atmosphere from layered shapes, gradients and filters, and set any text the scene needs as SVG text. Reference only ids inside the file (href=\"#id\", url(#id)): no external or embedded images, fonts or stylesheets, no scripts, no foreignObject, no DOCTYPE. Reply with only the SVG document, from <svg to </svg>, with no code fence and no explanation.";
+    return ". Paint this as one standalone SVG wallpaper with viewBox=\"0 0 1920 1080\" (16:9) that fills the whole canvas edge to edge. Build depth, light and atmosphere from layered shapes, gradients and filters, and set any text the scene needs as SVG text. Reference only ids inside the file (href=\"#id\", url(#id)): no external or embedded images, fonts or stylesheets, no scripts, no foreignObject, no DOCTYPE. Do not use any tools. Reply with only the SVG document, from its opening svg tag to its closing svg tag, with no code fence and no explanation.";
   }
   return ". Generate this image in ONE single text-to-image generation from this prompt alone (scene, style and any text rendered by the generator itself): do not use image_edit or any existing/reference image, and never overlay, composite or draw text with code. Save it as a PNG file at " + out + ". Reply only with the path.";
 }
 
-// The reply is untrusted text: plain SVG, SVG inside a code fence, or the
-// result field of `claude --output-format json`.
+function replyJson(trimmed) {
+  if (trimmed.charAt(trimmed.length - 1) !== "}") return null;
+  var at = trimmed.charAt(0) === "{" ? 0 : trimmed.indexOf("\n{") + 1;
+  if (at === 0 && trimmed.charAt(0) !== "{") return null;
+  try {
+    var j = JSON.parse(trimmed.slice(at));
+    return j && typeof j === "object" && !Array.isArray(j) ? j : null;
+  } catch (e) { return null; }
+}
+// The reply is untrusted text: plain SVG, SVG inside a code fence, or a JSON
+// object (`result` from claude, `response` from gemini), possibly after log lines.
 function svgFromReply(text) {
   var t = String(text || "");
-  var trimmed = t.trim();
-  if (trimmed.charAt(0) === "{") {
-    var j = null;
-    try { j = JSON.parse(trimmed); } catch (e) {}
-    if (j && typeof j === "object") {
-      if (j.is_error === true) return { svg: null, error: "provider error: " + String(j.result || j.subtype || "unknown").slice(0, 300) };
-      if (typeof j.result === "string") t = j.result;
-    }
+  var j = replyJson(t.trim());
+  if (j) {
+    if (j.is_error === true) return { svg: null, error: "provider error: " + String(j.result || j.subtype || "unknown").slice(0, 300) };
+    if (j.error && typeof j.error === "object") return { svg: null, error: "provider error: " + String(j.error.message || j.error.type || "unknown").slice(0, 300) };
+    if (typeof j.result === "string") t = j.result;
+    else if (typeof j.response === "string") t = j.response;
   }
   var a = t.search(/<svg[\s>]/i);
   var b = t.toLowerCase().lastIndexOf("</svg>");
@@ -976,7 +993,7 @@ async function generateImage(name, ctx, s) {
   var cmd = buildGenCommand(g.command || providerCommand(prov));
   var timeout = Math.max(typeof g.timeout === "number" ? g.timeout : 1200, 1200);
   log("generating with " + PROVIDERS[prov].label + " (timeout " + timeout + "s): " + prompt);
-  var r = await shEnv(cmd, { CYCLE_PROMPT: full, CYCLE_OUT: out }, timeout);
+  var r = await shEnv(cmd, { CYCLE_PROMPT: full, CYCLE_OUT: out, CYCLE_PLUGIN: pluginDir() }, timeout);
   if (await host.exists(out)) return out;
   if (PROVIDERS[prov].output === "svg") return pngFromReply(r, out);
   var msg = String(r.err || "").trim() ? r.err : r.out;

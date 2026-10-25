@@ -14,16 +14,31 @@ function plain(v) { return JSON.parse(JSON.stringify(v)); }
 function eq(actual, expected, msg) { assert.deepEqual(plain(actual), expected, msg); }
 
 // Provider table and old settings that only have a command.
-eq(E.providerNames(), ["grok", "claude", "custom"]);
-assert.equal(E.providerCommand("grok"), "grok -p {prompt_q} --always-approve --output-format json");
-assert.equal(E.providerCommand("claude"), "claude -p {prompt_q} --tools \"\" --strict-mcp-config --output-format json --no-session-persistence < /dev/null");
-assert.equal(E.providerCommand("custom"), "");
+var GEMINI_POLICY = "\"$CYCLE_PLUGIN/policies/gemini-no-tools.toml\"";
+var COMMANDS = {
+  grok: "grok -p {prompt_q} --always-approve --output-format json",
+  claude: "claude -p {prompt_q} --tools \"\" --strict-mcp-config --output-format json --no-session-persistence < /dev/null",
+  codex: "codex exec --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable shell_tool --disable unified_exec --disable apps --disable plugins --disable image_generation -c web_search=disabled --color never {prompt_q} < /dev/null",
+  gemini: "test -f " + GEMINI_POLICY + " && gemini -p {prompt_q} --skip-trust --admin-policy " + GEMINI_POLICY + " -e none -o json < /dev/null",
+  copilot: "copilot -p {prompt_q} --available-tools none --disable-builtin-mcps --no-custom-instructions --no-ask-user --no-color -s < /dev/null",
+  custom: ""
+};
+eq(E.providerNames(), ["grok", "claude", "codex", "gemini", "copilot", "custom"]);
+eq(E.providerLabels(), ["Grok", "Claude", "Codex", "Gemini", "Copilot", "Custom"]);
+for (var name of E.providerNames()) {
+  assert.equal(E.providerCommand(name), COMMANDS[name], name);
+  if (name !== "custom") assert.equal(E.genProvider({ command: COMMANDS[name] }), name, "provider read from the " + name + " command");
+}
+var policy = fs.readFileSync(path.join(loaded.root, "policies/gemini-no-tools.toml"), "utf8");
+assert.match(policy, /^\[\[rule\]\]\ntoolName = "\*"\ndecision = "deny"\npriority = 999$/m);
 assert.equal(E.providerCommand("__proto__"), "");
 assert.equal(E.genProvider({ provider: "claude", command: "grok -p {prompt_q}" }), "claude");
 assert.equal(E.genProvider({ provider: "Custom", command: "claude -p {prompt_q}" }), "custom");
 assert.equal(E.genProvider({ provider: "bogus", command: "claude -p {prompt_q}" }), "claude");
 assert.equal(E.genProvider({ command: "grok -p {prompt_q} --always-approve --output-format json" }), "grok");
 assert.equal(E.genProvider({ command: "/usr/local/bin/claude -p {prompt_q}" }), "claude");
+assert.equal(E.genProvider({ command: "~/.local/bin/codex exec {prompt_q}" }), "codex");
+assert.equal(E.genProvider({ command: "custom-image {prompt_q} {out}" }), "custom");
 assert.equal(E.genProvider({ command: "cp /tmp/x.png {out}" }), "custom");
 assert.equal(E.genProvider({ command: "" }), "grok");
 assert.equal(E.genProvider(null), "grok");
@@ -31,11 +46,14 @@ var defaults = E.defaultSettings().generator;
 assert.equal(defaults.provider, "grok");
 assert.equal(defaults.command, E.providerCommand("grok"));
 
-// The Claude prompt asks for SVG text; the Grok prompt still names the PNG path.
+// The agents are asked for SVG text; the Grok prompt still names the PNG path.
+// The request never contains "<svg" itself, so an echoed prompt is not mistaken for the reply.
 var claudeAsk = E.genInstructions("claude", "/x/out.png");
 assert.ok(claudeAsk.indexOf("SVG") >= 0);
 assert.equal(claudeAsk.indexOf("/x/out.png"), -1);
 assert.equal(claudeAsk.indexOf("http://"), -1);
+assert.equal(claudeAsk.toLowerCase().indexOf("<svg"), -1);
+for (var agent of ["codex", "gemini", "copilot"]) assert.equal(E.genInstructions(agent, "/x/out.png"), claudeAsk);
 assert.ok(E.genInstructions("grok", "/x/out.png").indexOf("Save it as a PNG file at /x/out.png") >= 0);
 assert.equal(E.genInstructions("custom", "/x/out.png"), E.genInstructions("grok", "/x/out.png"));
 
@@ -50,6 +68,10 @@ var SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3
 eq(E.svgFromReply(JSON.stringify({ type: "result", is_error: false, result: "```svg\n" + SVG + "\n```" })), { svg: SVG, error: "" });
 eq(E.svgFromReply("Here it is:\n<?xml version=\"1.0\"?>\n" + SVG + "\nEnjoy."), { svg: SVG, error: "" });
 eq(E.svgFromReply(JSON.stringify({ type: "result", is_error: true, result: "Not logged in" })), { svg: null, error: "provider error: Not logged in" });
+eq(E.svgFromReply(JSON.stringify({ session_id: "s", response: SVG, stats: {} }, null, 2)), { svg: SVG, error: "" });
+eq(E.svgFromReply("Warning: 256-color support not detected.\n" + JSON.stringify({ response: SVG }, null, 2)), { svg: SVG, error: "" });
+eq(E.svgFromReply(JSON.stringify({ session_id: "s", error: { type: "Error", message: "Please set an Auth method", code: 41 } })), { svg: null, error: "provider error: Please set an Auth method" });
+eq(E.svgFromReply("<style>\n{ }</style>" + SVG), { svg: SVG, error: "" });
 assert.equal(E.svgFromReply("I can't draw that.").svg, null);
 assert.equal(E.svgFromReply("</svg> <svg>").svg, null);
 assert.equal(E.svgFromReply("").svg, null);
@@ -80,8 +102,8 @@ assert.match(E.svgProblem(padded), /larger than/);
 var wide = "<svg>" + "é".repeat(62 * 1024) + "</svg>";
 assert.match(E.svgProblem(wide), /larger than/, "the cap counts UTF-8 bytes");
 
-// End to end with stand-ins for claude and rsvg-convert on PATH. The default
-// command runs unchanged, so its argument vector is checked as the CLI sees it.
+// End to end with stand-ins for the agent CLIs and rsvg-convert on PATH. Each
+// default command runs unchanged, so its argument vector is checked as the CLI sees it.
 function chunk(type, data) {
   var body = Buffer.from(data);
   var len = Buffer.alloc(4); len.writeUInt32BE(body.length);
@@ -98,19 +120,23 @@ var tiny = Buffer.concat([
   chunk("IEND", Buffer.alloc(0))
 ]);
 
-var home = fs.mkdtempSync(path.join(os.tmpdir(), "cycle-claude-"));
+var home = fs.mkdtempSync(path.join(os.tmpdir(), "cycle-agents-"));
 var fake = path.join(home, "fake");
-var claudeBin = path.join(fake, "claude-bin");
+var agentBin = path.join(fake, "agent-bin");
 var rsvgBin = path.join(fake, "rsvg-bin");
-fs.mkdirSync(claudeBin, { recursive: true });
+fs.mkdirSync(agentBin, { recursive: true });
 fs.mkdirSync(rsvgBin, { recursive: true });
 fs.writeFileSync(path.join(fake, "tiny.png"), tiny);
-fs.writeFileSync(path.join(claudeBin, "claude"), [
-  "#!/bin/sh",
-  "printf '%s\\0' \"$@\" > \"$FAKE_DIR/claude-args\"",
-  "readlink /proc/$$/fd/0 > \"$FAKE_DIR/claude-stdin\"",
-  "cat \"$FAKE_DIR/reply\""
-].join("\n") + "\n", { mode: 0o755 });
+// Like codex, each stand-in echoes the prompt to stderr; only the reply goes to stdout.
+for (var cli of ["claude", "codex", "gemini", "copilot"]) {
+  fs.writeFileSync(path.join(agentBin, cli), [
+    "#!/bin/sh",
+    "printf '%s\\0' \"$@\" > \"$FAKE_DIR/" + cli + "-args\"",
+    "readlink /proc/$$/fd/0 > \"$FAKE_DIR/" + cli + "-stdin\"",
+    "printf 'user\\n%s\\n' \"$CYCLE_PROMPT\" >&2",
+    "cat \"$FAKE_DIR/reply\""
+  ].join("\n") + "\n", { mode: 0o755 });
+}
 fs.writeFileSync(path.join(rsvgBin, "rsvg-convert"), [
   "#!/bin/sh",
   "printf '%s\\0' \"$@\" > \"$FAKE_DIR/rsvg-args\"",
@@ -120,7 +146,7 @@ fs.writeFileSync(path.join(rsvgBin, "rsvg-convert"), [
 
 var realPath = process.env.PATH || "/usr/bin:/bin";
 process.env.FAKE_DIR = fake;
-process.env.PATH = claudeBin + ":" + rsvgBin + ":" + realPath;
+process.env.PATH = agentBin + ":" + rsvgBin + ":" + realPath;
 
 var h = createNodeHost({ pluginRoot: loaded.root, linkCli: false, home: home });
 h.home = home;
@@ -138,7 +164,7 @@ await E.updateSettings(function(s) {
 var ctx = { phase: "evening", condition: "clear sky", location: "Genova", temperature: 18 };
 function reply(text) {
   fs.writeFileSync(path.join(fake, "reply"), text);
-  for (var f of ["claude-args", "rsvg-args", "rsvg-stdin"]) fs.rmSync(path.join(fake, f), { force: true });
+  for (var f of ["claude-args", "codex-args", "gemini-args", "copilot-args", "rsvg-args", "rsvg-stdin"]) fs.rmSync(path.join(fake, f), { force: true });
 }
 
 reply(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "```svg\n" + SVG + "\n```" }));
@@ -157,6 +183,37 @@ assert.equal(fs.readFileSync(path.join(fake, "rsvg-stdin"), "utf8"), SVG);
 var rargv = fs.readFileSync(path.join(fake, "rsvg-args"), "utf8").split("\0").slice(0, -1);
 eq(rargv, ["-w", "3840", "-h", "2160", "-f", "png", "-o", made + ".part"]);
 assert.ok(notes.some(function(line) { return line.indexOf("generating with Claude") === 0; }));
+
+// Codex prints the final message as plain text, Gemini as JSON, Copilot as plain text.
+var ASK = "A quiet harbour at evening, clear sky" + E.genInstructions("codex", "");
+var agents = [
+  { name: "codex", reply: SVG + "\n", argv: ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps", "--disable", "plugins", "--disable", "image_generation", "-c", "web_search=disabled", "--color", "never", ASK] },
+  { name: "gemini", reply: JSON.stringify({ session_id: "s", response: "```svg\n" + SVG + "\n```", stats: {} }, null, 2), argv: ["-p", ASK, "--skip-trust", "--admin-policy", path.join(loaded.root, "policies/gemini-no-tools.toml"), "-e", "none", "-o", "json"] },
+  { name: "copilot", reply: "```svg\n" + SVG + "\n```\n", argv: ["-p", ASK, "--available-tools", "none", "--disable-builtin-mcps", "--no-custom-instructions", "--no-ask-user", "--no-color", "-s"] }
+];
+for (var a of agents) {
+  await E.updateSettings(function(s) { s.generator.provider = a.name; s.generator.command = E.providerCommand(a.name); });
+  reply(a.reply);
+  notes.length = 0;
+  var img = await E.generateImage(a.name + "-ok", ctx, await E.settings());
+  assert.ok(img, a.name + ": " + notes.join("\n"));
+  eq(fs.readFileSync(path.join(fake, a.name + "-args"), "utf8").split("\0").slice(0, -1), a.argv, a.name);
+  assert.equal(fs.readFileSync(path.join(fake, a.name + "-stdin"), "utf8").trim(), "/dev/null", a.name);
+  assert.equal(fs.readFileSync(path.join(fake, "rsvg-stdin"), "utf8"), SVG, a.name);
+  assert.ok(notes.some(function(line) { return line.indexOf("generating with " + E.providerLabels()[E.providerNames().indexOf(a.name)]) === 0; }), a.name);
+}
+
+// Gemini does not start when the no-tools policy is missing: it would run with its tools.
+var bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cycle-noplugin-"));
+h.pluginRoot = bareRoot;
+await E.updateSettings(function(s) { s.generator.provider = "gemini"; s.generator.command = E.providerCommand("gemini"); });
+reply(JSON.stringify({ response: SVG }));
+notes.length = 0;
+assert.equal(await E.generateImage("gemini-nopolicy", ctx, await E.settings()), null);
+assert.equal(fs.existsSync(path.join(fake, "gemini-args")), false, "gemini ran without its policy file");
+assert.ok(notes.some(function(line) { return line.indexOf("generation failed (rc=1): reply has no <svg> document") >= 0; }), notes.join("\n"));
+h.pluginRoot = loaded.root;
+await E.updateSettings(function(s) { s.generator.provider = "claude"; s.generator.command = E.providerCommand("claude"); });
 
 // A reply that points outside the document is never rendered.
 reply(JSON.stringify({ type: "result", is_error: false, result: "<svg><image href=\"file:///etc/passwd\"/></svg>" }));
@@ -185,12 +242,12 @@ fs.mkdirSync(bare);
 for (var tool of ["bash", "rm", "mv", "cat", "readlink"]) {
   fs.symlinkSync(execFileSync("sh", ["-c", "command -v " + tool], { env: { PATH: realPath }, encoding: "utf8" }).trim(), path.join(bare, tool));
 }
-process.env.PATH = claudeBin + ":" + bare;
+process.env.PATH = agentBin + ":" + bare;
 reply(JSON.stringify({ type: "result", is_error: false, result: SVG }));
 notes.length = 0;
 assert.equal(await E.generateImage("claude-norsvg", ctx, await E.settings()), null);
 assert.ok(notes.some(function(line) { return line.indexOf("SVG render failed (rc=127): rendering SVG needs rsvg-convert (Arch package librsvg)") >= 0; }), notes.join("\n"));
-process.env.PATH = claudeBin + ":" + rsvgBin + ":" + realPath;
+process.env.PATH = agentBin + ":" + rsvgBin + ":" + realPath;
 
 // Settings saved before providers existed keep working for Grok-style commands.
 await E.updateSettings(function(s) { delete s.generator.provider; s.generator.command = "cp " + path.join(fake, "tiny.png") + " {out}"; });
@@ -200,7 +257,7 @@ assert.ok(await E.generateImage("legacy", ctx, await E.settings()));
 var realRsvg = null;
 try { realRsvg = execFileSync("sh", ["-c", "command -v rsvg-convert"], { env: { PATH: realPath }, encoding: "utf8" }).trim(); } catch (e) {}
 if (realRsvg) {
-  process.env.PATH = claudeBin + ":" + realPath;
+  process.env.PATH = agentBin + ":" + realPath;
   await E.updateSettings(function(s) { s.generator.provider = "claude"; s.generator.command = E.providerCommand("claude"); });
   reply(JSON.stringify({ type: "result", is_error: false, result: SVG }));
   var real = await E.generateImage("claude-real", ctx, await E.settings());
@@ -213,4 +270,4 @@ if (realRsvg) {
 }
 
 process.env.PATH = realPath;
-console.log("claude provider tests passed");
+console.log("provider tests passed");

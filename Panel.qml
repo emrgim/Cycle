@@ -847,14 +847,14 @@ Item {
               }
             }
             Label { text: "Generation"; color: "#f2efe9"; font.bold: true }
-            Label { text: "Night window hours (from / to). Placeholders: {{location}} {{temperature}} {{condition}} {{phase}} and {prompt_q} {out}. Grok and custom commands write the PNG; Claude replies with SVG that Cycle renders (needs rsvg-convert from librsvg)."; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { text: "Night window hours (from / to). Placeholders: {{location}} {{temperature}} {{condition}} {{phase}} and {prompt_q} {out}. Grok and custom commands write the PNG; Claude, Codex, Gemini and Copilot run without tools and reply with SVG that Cycle renders (needs rsvg-convert from librsvg)."; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             TextField { id: schedFrom; placeholderText: "From hour"; width: parent.width; color: "#f2efe9" }
             TextField { id: schedTo; placeholderText: "To hour"; width: parent.width; color: "#f2efe9" }
             TextField { id: genTemplate; placeholderText: "Prompt template"; width: parent.width; color: "#f2efe9" }
-            ComboBox {
+            PlainCombo {
               id: genProviderBox
               width: parent.width
-              model: ["Grok", "Claude", "Custom"]
+              model: Cycle.providerLabels()
               onActivated: {
                 if (root.filling) return
                 var cmd = Cycle.providerCommand(Cycle.providerNames()[currentIndex])
