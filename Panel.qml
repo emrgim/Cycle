@@ -221,7 +221,10 @@ Item {
       phaseEvening.text = times.evening || "sunset"
       phaseNight.text = times.night || "civil_dusk"
       genTemplate.text = (s.generator && s.generator.template) || ""
-      genCommand.text = (s.generator && s.generator.command) || ""
+      root.filling = true
+      genProviderBox.currentIndex = Math.max(0, Cycle.providerNames().indexOf(Cycle.genProvider(s.generator)))
+      root.filling = false
+      genCommand.text = (s.generator && s.generator.command) || Cycle.providerCommand(Cycle.genProvider(s.generator))
       genTimeout.text = String((s.generator && s.generator.timeout) || 1200)
       schedFrom.text = String(s.schedule && typeof s.schedule.from === "number" ? s.schedule.from : 6)
       schedTo.text = String(s.schedule && typeof s.schedule.to === "number" ? s.schedule.to : 18)
@@ -844,10 +847,20 @@ Item {
               }
             }
             Label { text: "Generation"; color: "#f2efe9"; font.bold: true }
-            Label { text: "Night window hours (from / to). Placeholders: {{location}} {{temperature}} {{condition}} {{phase}} and {prompt_q} {out}."; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
+            Label { text: "Night window hours (from / to). Placeholders: {{location}} {{temperature}} {{condition}} {{phase}} and {prompt_q} {out}. Grok and custom commands write the PNG; Claude replies with SVG that Cycle renders (needs rsvg-convert from librsvg)."; wrapMode: Text.WordWrap; width: parent.width; color: "#a8a39a" }
             TextField { id: schedFrom; placeholderText: "From hour"; width: parent.width; color: "#f2efe9" }
             TextField { id: schedTo; placeholderText: "To hour"; width: parent.width; color: "#f2efe9" }
             TextField { id: genTemplate; placeholderText: "Prompt template"; width: parent.width; color: "#f2efe9" }
+            ComboBox {
+              id: genProviderBox
+              width: parent.width
+              model: ["Grok", "Claude", "Custom"]
+              onActivated: {
+                if (root.filling) return
+                var cmd = Cycle.providerCommand(Cycle.providerNames()[currentIndex])
+                if (cmd) genCommand.text = cmd
+              }
+            }
             TextField { id: genCommand; placeholderText: "Generator command"; width: parent.width; color: "#f2efe9" }
             TextField { id: genTimeout; placeholderText: "Timeout seconds"; width: parent.width; color: "#f2efe9" }
             RowLayout {
@@ -855,6 +868,7 @@ Item {
                 text: "Save generation"
                 onClicked: Cycle.updateSettings(function(s) {
                   if (!s.generator) s.generator = {}
+                  s.generator.provider = Cycle.providerNames()[genProviderBox.currentIndex] || "grok"
                   s.generator.template = genTemplate.text
                   s.generator.command = genCommand.text
                   var to = parseInt(genTimeout.text, 10)

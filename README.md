@@ -16,7 +16,7 @@ Most auto-brightness or night-light tools either fight you (they re-apply their 
 - **Manual override kept until the next slot:** change brightness yourself and Cycle holds your value until the slot changes.
 - **Every override logged:** time, slot, Cycle's base value and your value, in `~/.local/state/cycle/overrides.json`.
 - **Learns your preference:** 3+ overrides in the same direction on different days, and the median becomes that slot's learned brightness (approached at most 5 points per day).
-- **Live-data wallpapers + palette theme:** prompts you write are filled with live weather, air quality, sea, sun position and news headlines, sent to an image generator you configure, and applied as the wallpaper of a generated **Cycle** Omarchy theme whose colour palette is extracted from the image.
+- **Live-data wallpapers + palette theme:** prompts you write are filled with live weather, air quality, sea, sun position and news headlines, sent to the image provider you pick (Grok, Claude, or your own command), and applied as the wallpaper of a generated **Cycle** Omarchy theme whose colour palette is extracted from the image.
 - **Weather rules:** presets for hot (≥ 40 °C), rain and sandstorm (dust ≥ 150) conditions, from Open-Meteo (no API key).
 - **Bar, panel, and command line:** an icon-only bar widget, a shell window, and a scriptable command with JSON output.
 - **No separate build:** the marketplace copy is the running plugin. A shell timer inside the plugin replaces the old user timer.
@@ -45,7 +45,7 @@ Most auto-brightness or night-light tools either fight you (they re-apply their 
 - **Omarchy** (Arch Linux + Hyprland). Cycle calls Omarchy's own tools: `omarchy-theme-set`, `omarchy-theme-bg-set`, `omarchy-theme-current`, `omarchy-notification-send`, and `hyprctl hyprsunset` for colour temperature.
 - **brightnessctl** for reading and setting the backlight (`brightnessctl -m`, `brightnessctl set N%`).
 - Optional: **NetworkManager** (`nmcli`) or `iwgetid` for Wi-Fi-based location rules.
-- Optional: a logged-in image command such as the [Grok CLI](https://github.com/xai-org/grok-cli), or any other command that writes a PNG. See [Generator command](#generator-command).
+- Optional, for wallpapers: one image provider. Either the [Grok CLI](https://github.com/xai-org/grok-cli), or [Claude Code](https://code.claude.com/docs/en/overview) (`claude`, logged in) together with `rsvg-convert` (Arch package `librsvg`, already present wherever GTK is), or any other command that writes a PNG. See [Generator command](#generator-command).
 - Optional: `~/.local/bin/omarchy-display`. Presets apply dark/light mode, preset brightness, warmth and night shift through it. It is not part of this plugin; without it those preset steps are skipped, while slot brightness (`brightnessctl`) and theme/wallpaper changes still run.
 - The command line prefers `node` when it is present, and otherwise runs through `qml`. The bar widget, background service, and window do not need `node`.
 
@@ -61,7 +61,7 @@ The command is also available as `~/.config/omarchy/plugins/emrgim.cycle/bin/cyc
 1. **Open the window** from the bar icon, or run `cycle app` (Super+Space → Cycle).
 2. **Enable Automatic Cycle** on the **Now** tab (same as `cycle engine on`).
 3. **Location** is detected once, the first time Cycle starts with nothing saved. Change it on **Settings**, or press **Detect location** to look it up again.
-4. **Set the generator** on **Settings → Generation** if you want wallpapers.
+4. **Pick a provider** (Grok, Claude or Custom) on **Settings → Generation** if you want wallpapers.
 5. **Create a prompt** on the **Prompt** tab, for example `A wide city skyline at /time, sky /sun, weather /weather`. Check the live preview, then press **Generate**.
 6. **Schedule it** on the **Schedule** tab: pick 15, 30, 60, 120 or 180 minutes and a window (dawn–dusk or always).
 
@@ -132,6 +132,7 @@ Enabling the plugin **generates nothing until you configure it**.
 - **Location is detected once** on that first start, from a privacy-respecting HTTPS IP geolocation lookup (city, coordinates, timezone), then stored. A location you save yourself is never replaced on restart, when the network changes, or when Cycle is updated. If the lookup fails and nothing was saved, Settings says **location unknown, set it in Settings**.
 - **Generation window** defaults to **06:00–18:00**.
 - **Default RSS feed:** Google News in English until a city is detected; the first successful detection points the feed at that city. **Open-Meteo** needs no API key.
+- **The image provider is Grok.** Switch to Claude or a custom command on **Settings → Generation**.
 - **Without a working generator command**, generation fails and the **current wallpaper is kept**.
 
 Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
@@ -189,10 +190,17 @@ On **Settings**, the Generation section stores:
 | Field | What it is |
 |---|---|
 | **Prompt template** | Text used when building the image prompt |
-| **Generator command** | Command Cycle runs to produce the wallpaper PNG |
+| **Provider** | Grok, Claude or Custom. Picking Grok or Claude fills in that provider's default command |
+| **Generator command** | Command Cycle runs to produce the wallpaper |
 | **Timeout (s)** | Timeout for that command; the effective value is at least 1200 |
 
-The same values live in `~/.config/omarchy/cycle/settings.json` under `generator`.
+The same values live in `~/.config/omarchy/cycle/settings.json` under `generator` (`provider` is `grok`, `claude` or `custom`). Settings saved before providers existed have no `provider`; Cycle reads it from the command (`claude …` is Claude, `grok …` or an empty command is Grok, anything else is Custom).
+
+| Provider | Default command | How the image is made |
+|---|---|---|
+| Grok | `grok -p {prompt_q} --always-approve --output-format json` | Grok generates the image and saves the PNG at the output path |
+| Claude | `claude -p {prompt_q} --tools "" --strict-mcp-config --output-format json --no-session-persistence < /dev/null` | Claude replies with an SVG; Cycle checks it and renders it to a 3840×2160 PNG |
+| Custom | none | Your command writes the PNG at the output path |
 
 Cycle runs the command template with `bash -c`. Placeholders are replaced in one pass, and the prompt and output path are passed as environment values, never spliced into the command text:
 
@@ -210,7 +218,16 @@ The default command string is:
 grok -p {prompt_q} --always-approve --output-format json
 ```
 
-That names the [Grok CLI](https://github.com/xai-org/grok-cli) only as a default. Cycle does not fetch or sign in to it. Any other command that writes a PNG to the output path is a valid replacement.
+That names the [Grok CLI](https://github.com/xai-org/grok-cli) only as a default. Cycle does not fetch or sign in to it, or to Claude Code. Any other command that writes a PNG to the output path is a valid replacement.
+
+### Claude
+Claude Code has no image tool, so Cycle asks it for a vector wallpaper instead: one standalone SVG with a 1920×1080 view box. Generated wallpapers are illustrated, not photographic.
+
+- **No tools.** `--tools ""` turns off every built-in tool (shell, files, web) and `--strict-mcp-config` loads no MCP servers. Claude only returns text, so a hostile headline inside the prompt has nothing to run. `--no-session-persistence` keeps scheduled runs out of your `claude --resume` list, and `< /dev/null` stops it waiting for input.
+- **The reply is checked before it is drawn.** Cycle takes the `<svg>…</svg>` document from the reply (plain, in a code fence, or in the `result` field of the JSON output) and refuses it if it is larger than 120 KiB or has a DOCTYPE or entity, a processing instruction, a `script`, `image`, `feImage` or `foreignObject` element, an `@import`, or any `href` or `url()` that does not point to an `#id` inside the same file.
+- **Rendering.** `rsvg-convert` reads the SVG on standard input, so relative paths have no file to resolve against. The PNG is written as `.part` and renamed only when rendering succeeds.
+- Add `--model opus` (or another model) to the command to choose the model; otherwise Claude Code uses its default.
+- If an edited Claude command writes a PNG at the output path itself (`{out}`), that PNG is used and the reply is ignored.
 
 ## Day phases (no fixed clock hours)
 Boundaries are recomputed every day from the NOAA sun model for the configured coordinates. The clock used for "now" is the machine's timezone.
@@ -268,6 +285,7 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 - **Nothing changes during the day.** Automatic Cycle is off until you enable it. `cycle engine on`, then `cycle tick --force` to see one step.
 - **Brightness does not change.** `brightnessctl -m` must work for your user. A manual change is held until the next slot.
 - **Generation fails.** `cycle test-gen` or `cycle generate`. The generator must write a PNG to the output path. On failure the current wallpaper stays and a notification is sent.
+- **Claude generation fails.** Run `claude` once in a terminal to log in, and make sure `rsvg-convert` runs (`pacman -S librsvg`). The log line says whether the reply had no SVG, the SVG was refused, or rendering failed.
 - **No prompts or schedules.** The styles folder starts empty.
 - **Wrong sunrise or sunset.** Set location on Settings. The sample above uses timezone offset +4.
 - **Learning went the wrong way.** `cycle reset-profile [SLOT]` clears learned values. The override log stays.
@@ -280,12 +298,15 @@ node test/engine.test.mjs
 node test/date-bounds.test.mjs
 node test/png-bounds.test.mjs
 node test/qml-plaintext.test.mjs
+node test/claude-provider.test.mjs
 ```
 The engine checks cover the prompt language, the sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, first-run geolocation (including a failed lookup), and PNG palette extraction.
 
 `node test/date-bounds.test.mjs` checks that a hostile forecast offset (`utc_offset_seconds` of `1e300`, `Infinity`, or a value outside ±14 hours) cannot spin city sun expansion, and that date arithmetic still rolls real dates.
 
 `node test/png-bounds.test.mjs` checks that a truncated IDAT, a deflate bomb, and oversized dimensions are rejected, and that a valid wallpaper still produces the same palette.
+
+`node test/claude-provider.test.mjs` checks provider selection (including settings saved before providers existed), the exact argument list the default Claude command passes to `claude`, SVG extraction from plain, fenced and JSON replies, that SVGs pointing outside themselves are never rendered, and that a failed render leaves no file. It uses stand-in `claude` and `rsvg-convert` programs, and also renders a real 3840×2160 PNG when `rsvg-convert` is installed.
 
 `node test/fetch-bounds.test.mjs` checks that fetches are HTTPS and that the only `XMLHttpRequest` goes through the capped helper.
 

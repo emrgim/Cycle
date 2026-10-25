@@ -118,7 +118,7 @@ export function createNodeHost(opts) {
       }
       var timeout = Math.max(1, timeoutSec || 8);
       var cap = Math.max(1, maxBytes || 8192);
-      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.0.4 --output - -- \"$3\" | head -c \"$2\"";
+      var script = "set -o pipefail; curl --proto =https --proto-redir =https --max-time \"$1\" --max-filesize \"$2\" --fail --silent --show-error --location --max-redirs 2 --user-agent Cycle/2.1.0 --output - -- \"$3\" | head -c \"$2\"";
       var r = await run(["bash", "-c", script, "bash", String(timeout), String(cap), u], timeout + 2, null);
       var text = r.out || "";
       if (text.length > cap) text = text.slice(0, cap);
