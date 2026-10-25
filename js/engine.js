@@ -68,13 +68,14 @@ var PNG_MAX_RAW = 40 * 1024 * 1024;
 // when that file is missing, so its command refuses to start without it.
 var GEMINI_POLICY = "\"$CYCLE_PLUGIN/policies/gemini-no-tools.toml\"";
 var PROVIDER_NAMES = ["grok", "claude", "codex", "gemini", "copilot", "custom"];
+var SVG_HINT = " runs with every tool off and replies with an SVG drawing that Cycle renders with rsvg-convert. Wallpapers are illustrated, not photographic.";
 var PROVIDERS = {
-  grok: { label: "Grok", command: "grok -p {prompt_q} --always-approve --output-format json", output: "png" },
-  claude: { label: "Claude", command: "claude -p {prompt_q} --tools \"\" --strict-mcp-config --output-format json --no-session-persistence < /dev/null", output: "svg" },
-  codex: { label: "Codex", command: "codex exec --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable shell_tool --disable unified_exec --disable apps --disable plugins --disable image_generation -c web_search=disabled --color never {prompt_q} < /dev/null", output: "svg" },
-  gemini: { label: "Gemini", command: "test -f " + GEMINI_POLICY + " && gemini -p {prompt_q} --skip-trust --admin-policy " + GEMINI_POLICY + " -e none -o json < /dev/null", output: "svg" },
-  copilot: { label: "Copilot", command: "copilot -p {prompt_q} --available-tools none --disable-builtin-mcps --no-custom-instructions --no-ask-user --no-color -s < /dev/null", output: "svg" },
-  custom: { label: "Custom", command: "", output: "png" }
+  grok: { label: "Grok", command: "grok -p {prompt_q} --always-approve --output-format json", output: "png", hint: "Grok generates the image itself and saves the PNG at the output path." },
+  claude: { label: "Claude", command: "claude -p {prompt_q} --tools \"\" --strict-mcp-config --output-format json --no-session-persistence < /dev/null", output: "svg", hint: "Claude Code" + SVG_HINT },
+  codex: { label: "Codex", command: "codex exec --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable shell_tool --disable unified_exec --disable apps --disable plugins --disable image_generation -c web_search=disabled --color never {prompt_q} < /dev/null", output: "svg", hint: "Codex" + SVG_HINT },
+  gemini: { label: "Gemini", command: "test -f " + GEMINI_POLICY + " && gemini -p {prompt_q} --skip-trust --admin-policy " + GEMINI_POLICY + " -e none -o json < /dev/null", output: "svg", hint: "Gemini CLI" + SVG_HINT },
+  copilot: { label: "Copilot", command: "copilot -p {prompt_q} --available-tools none --disable-builtin-mcps --no-custom-instructions --no-ask-user --no-color -s < /dev/null", output: "svg", hint: "Copilot CLI" + SVG_HINT },
+  custom: { label: "Custom", command: "", output: "png", hint: "Your command must write a PNG at {out}. The prompt is in $CYCLE_PROMPT, the plugin folder in $CYCLE_PLUGIN." }
 };
 // The SVG reaches the renderer as one environment value, which Linux caps at 128 KiB.
 var SVG_MAX_BYTES = 120 * 1024;
@@ -104,8 +105,10 @@ function arm(h) {
   if (armed) return false;
   setHost(h);
   armed = true;
-  seed().then(function() {
-    if (host && host.startTimer) host.startTimer();
+  function start() { if (host && host.startTimer) host.startTimer(); }
+  seed().then(start, function(e) {
+    logErr("cycle: setup failed: " + (e && e.message || e));
+    start();
   });
   return true;
 }
@@ -293,7 +296,11 @@ async function rd(p) {
   if (t == null || t === "") return null;
   try { return JSON.parse(t); } catch (e) { return null; }
 }
-async function wr(p, v) { return host.writeFile(p, JSON.stringify(v, null, 2) + "\n"); }
+async function wr(p, v) {
+  var ok = await host.writeFile(p, JSON.stringify(v, null, 2) + "\n");
+  if (!ok) logErr("write failed: " + p);
+  return !!ok;
+}
 async function readText(p) {
   var t = await host.readFile(p);
   return t == null ? "" : String(t);
@@ -418,7 +425,10 @@ async function readSettings() {
   var file = await rd(settingsPath());
   if (file && typeof file === "object" && !Array.isArray(file)) {
     var keys = Object.keys(file);
-    for (var i = 0; i < keys.length; i++) s[keys[i]] = clone(file[keys[i]]);
+    for (var i = 0; i < keys.length; i++) {
+      if (!plainKey(keys[i])) continue;
+      s[keys[i]] = clone(file[keys[i]]);
+    }
   }
   return s;
 }
@@ -427,7 +437,9 @@ async function settings() {
   if (locationRecorded(s.location)) return s;
   return setupLocationOnce();
 }
-async function saveSettings(s) { await wr(settingsPath(), s); }
+async function saveSettings(s) {
+  if (!(await wr(settingsPath(), s))) throw new Error("could not write " + settingsPath());
+}
 async function updateSettings(fn) {
   var s = await settings();
   fn(s);
@@ -494,27 +506,57 @@ async function listNames(dir, ext) {
   v.sort();
   return v;
 }
-async function preset(n) { return rd(join(presetsDir(), n + ".json")); }
-async function savePreset(n, v) { await wr(join(presetsDir(), n + ".json"), v); }
-async function cycleOf(n) { return rd(join(cyclesDir(), n + ".json")); }
-async function saveCycle(n, v) { await wr(join(cyclesDir(), n + ".json"), v); }
+// A key that is a property of every object (__proto__, constructor, prototype)
+// must never be used as a map entry: it reads or changes the object itself.
+function plainKey(k) { return k !== "__proto__" && k !== "constructor" && k !== "prototype"; }
+// Prompt, preset and cycle names become file names inside Cycle's own folders.
+// A name that could leave its folder, or that is a built-in property, is refused.
+function validName(n) {
+  if (typeof n !== "string" || !n || n.length > 128 || !plainKey(n)) return false;
+  if (n.charAt(0) === "." || n.trim() !== n) return false;
+  for (var i = 0; i < n.length; i++) {
+    var c = n.charCodeAt(i);
+    if (c < 32 || c === 127 || c === 47 || c === 92) return false;
+  }
+  return true;
+}
+function namedPath(dir, n, ext) { return validName(n) ? join(dir, n + "." + ext) : null; }
+async function preset(n) { var p = namedPath(presetsDir(), n, "json"); return p ? rd(p) : null; }
+async function savePreset(n, v) { var p = namedPath(presetsDir(), n, "json"); return p ? wr(p, v) : false; }
+async function cycleOf(n) { var p = namedPath(cyclesDir(), n, "json"); return p ? rd(p) : null; }
+async function saveCycle(n, v) { var p = namedPath(cyclesDir(), n, "json"); return p ? wr(p, v) : false; }
 async function promptNames() {
   var names = await listNames(stylesDir(), "txt");
   var out = [];
-  for (var i = 0; i < names.length; i++) if (names[i].indexOf(".bak") < 0) out.push(names[i]);
+  for (var i = 0; i < names.length; i++) if (names[i].indexOf(".bak") < 0 && validName(names[i])) out.push(names[i]);
   return out;
 }
-async function promptText(n) { return (await readText(join(stylesDir(), n + ".txt"))).trim(); }
-async function savePrompt(n, t) { await host.writeFile(join(stylesDir(), n + ".txt"), String(t).trim() + "\n"); }
-async function deletePrompt(n) { await host.removeFile(join(stylesDir(), n + ".txt")); }
+async function promptExists(n) { var p = namedPath(stylesDir(), n, "txt"); return p ? host.exists(p) : false; }
+async function promptText(n) { var p = namedPath(stylesDir(), n, "txt"); return p ? (await readText(p)).trim() : ""; }
+async function savePrompt(n, t) {
+  var p = namedPath(stylesDir(), n, "txt");
+  if (!p) return false;
+  var ok = await host.writeFile(p, String(t).trim() + "\n");
+  if (!ok) logErr("write failed: " + p);
+  return !!ok;
+}
+async function deletePrompt(n) {
+  var p = namedPath(stylesDir(), n, "txt");
+  if (p) await host.removeFile(p);
+  return !!p;
+}
 async function activePrompt() {
   var a = (await readText(join(stylesDir(), "active"))).trim();
-  if (a && await host.exists(join(stylesDir(), a + ".txt"))) return a;
+  if (a && await promptExists(a)) return a;
   return "gits-classic";
 }
-async function setActivePrompt(n) { await host.writeFile(join(stylesDir(), "active"), n + "\n"); }
+async function setActivePrompt(n) {
+  if (!validName(n)) return false;
+  return host.writeFile(join(stylesDir(), "active"), n + "\n");
+}
+function providerHint(name) { return hasKey(PROVIDERS, name) ? PROVIDERS[name].hint : ""; }
 function titleFrom(id, s) {
-  var custom = s && s.prompt_titles && s.prompt_titles[id];
+  var custom = s && s.prompt_titles && hasKey(s.prompt_titles, id) ? s.prompt_titles[id] : null;
   if (custom && String(custom).trim()) return String(custom);
   var parts = String(id).split(/[-_]/);
   var out = [];
@@ -527,7 +569,7 @@ function titleFrom(id, s) {
 async function setTitle(id, t) {
   await updateSettings(function(s) {
     if (!s.prompt_titles || typeof s.prompt_titles !== "object") s.prompt_titles = {};
-    s.prompt_titles[id] = String(t).trim();
+    if (validName(id)) s.prompt_titles[id] = String(t).trim();
   });
 }
 
@@ -859,7 +901,7 @@ async function resolveState(useWeather) {
   var ssid = await wifiSsid();
   var cyc = (s.cycles && s.cycles[dtp]) || dtp;
   var why = "day type " + dtp;
-  if (ssid && s.wifi && s.wifi[ssid]) { cyc = s.wifi[ssid]; why = "Wi-Fi '" + ssid + "'"; }
+  if (ssid && s.wifi && hasKey(s.wifi, ssid) && validName(s.wifi[ssid])) { cyc = s.wifi[ssid]; why = "Wi-Fi '" + ssid + "'"; }
   var c = await cycleOf(cyc);
   if (!c) c = await cycleOf("weekday");
   if (!c) c = { phases: {} };
@@ -987,7 +1029,7 @@ async function generateImage(name, ctx, s) {
   prompt = await expandPlaceholders(prompt, s);
   var key = hash10(prompt + fmtIso(nowDt()).replace("T", " "));
   await host.mkdirp(genDir());
-  var out = join(genDir(), name + "-" + key + ".png");
+  var out = join(genDir(), (safeName(name) || "image") + "-" + key + ".png");
   if (await host.exists(out)) return out;
   var full = prompt + genInstructions(prov, out);
   var cmd = buildGenCommand(g.command || providerCommand(prov));
@@ -1174,6 +1216,7 @@ async function curve(step) {
 
 // ---------- brightness ----------
 var TOLERANCE = 2, MIN_DAYS = 3, RECENT_DAYS = 7, STEP = 5;
+var OVERRIDE_LOG_MAX = 1000;
 function brightStatePath() { return join(stateDir(), "brightness.json"); }
 function overridesPath() { return join(stateDir(), "overrides.json"); }
 function profilePath() { return join(stateDir(), "profile.json"); }
@@ -1271,6 +1314,7 @@ async function brightnessStep(slot, rawBase, now) {
     var lg = (await rd(overridesPath())) || [];
     if (!Array.isArray(lg)) lg = [];
     lg.push({ at: ts, slot: slot, base: baseV, user: user });
+    if (lg.length > OVERRIDE_LOG_MAX) lg = lg.slice(lg.length - OVERRIDE_LOG_MAX);
     await wr(overridesPath(), lg);
     var learnedEntry = await learn(slot, now);
     if (learnedEntry) log("brightness: profile " + slot + " \u2192 target " + learnedEntry.target + " (current " + learnedEntry.current + ")");
@@ -1982,7 +2026,7 @@ async function runDue() {
     var n = names[i];
     var sc = m[n];
     if (!sc || !sc.enabled) continue;
-    if (!(await host.exists(join(stylesDir(), n + ".txt")))) continue;
+    if (!(await promptExists(n))) continue;
     var every = slotSize(typeof sc.every_min === "number" ? sc.every_min : 60);
     var lead = await leadSecs(n, sc);
     var from = dateAddMinutes(now, -4);
@@ -2013,7 +2057,7 @@ async function runDue() {
   }
 }
 async function generateAt(scheduled, prompt, applyAt) {
-  if (!(await lockAcquire())) { log("another generation is running \u2013 skipped"); return 0; }
+  if (!(await lockAcquire())) { log("another generation is running \u2013 skipped"); return 3; }
   try {
     var s = await settings();
     var noApply = !!(host.env && host.env("CYCLE_NO_APPLY"));
@@ -2134,6 +2178,7 @@ function safeName(n) {
 async function saveSchedule(name, sc) {
   await updateSettings(function(s) {
     if (!s.schedules || typeof s.schedules !== "object") s.schedules = {};
+    if (!validName(name)) return;
     var keys = Object.keys(s.schedules);
     for (var i = 0; i < keys.length; i++) if (keys[i] !== name && s.schedules[keys[i]]) s.schedules[keys[i]].enabled = false;
     s.schedules[name] = sc;
@@ -2556,11 +2601,40 @@ function flagValue(a, f) {
   for (var i = 0; i < a.length; i++) if (a[i] === f && i + 1 < a.length) return a[i + 1];
   return null;
 }
-var USAGE = "usage: cycle [app|generate [--scheduled]|tick [--force]|apply-now|resolve|state|apply-preset NAME|hold NAME|automatic|engine on|off|engine-is-on|theme-gen [--force] [--apply]|test-gen|live|prompt|generate --prompt NAME|schedules|prompts [list [--titles]|sync-menu]|open --prompt ID|expand TEXT|reset-profile [SLOT]|profile|brightness-step --slot S --base N [--at ISO]]";
+var USAGE = [
+  "usage: cycle COMMAND [options]",
+  "",
+  "  app                               open the window",
+  "  tick [--force]                    one engine step (the timer runs this every minute)",
+  "  apply-now                         apply the current slot immediately",
+  "  resolve | state                   resolved slot and preset | current display state (JSON)",
+  "  apply-preset NAME                 apply a preset once",
+  "  hold NAME | hold automatic        pin a preset | return to automatic",
+  "  engine on|off | engine-is-on      switch Automatic Cycle | exit 0 when it is on",
+  "  generate [--prompt ID] [--scheduled] [--apply-at ISO]",
+  "                                    live data \u2192 prompt \u2192 image \u2192 Cycle theme \u2192 archive",
+  "  test-gen | theme-gen [--force] [--apply]",
+  "  schedules                         last/next run and status of each prompt schedule",
+  "  prompts [list [--titles]|sync-menu]",
+  "  open --prompt ID                  open the window on a prompt",
+  "  live | prompt | expand TEXT       print live data | the prompt | a resolved text",
+  "  profile | reset-profile [SLOT]    learned brightness | forget it (slot: morning, afternoon, evening, night)",
+  "  brightness-step --slot S --base N [--at ISO]",
+  "  help                              this text",
+  "",
+  "Exit codes: 0 ok, 1 failed, 2 bad command or name, 3 another generation is already running."
+].join("\n");
+function usageError(msg) {
+  logErr("cycle: " + msg);
+  logErr("Run 'cycle help' for the commands.");
+  return 2;
+}
+function isPhase(n) { return PHASES.indexOf(n) >= 0; }
 async function main(argv) {
   argv = argv || [];
-  await seed();
   var cmd = argv.length ? argv[0] : "app";
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") { log(USAGE); return 0; }
+  await seed();
   if (cmd === "app") {
     var r = await shv(["omarchy-shell", "shell", "summon", "emrgim.cycle"], 20);
     return r.code === 0 ? 0 : r.code || 1;
@@ -2571,19 +2645,23 @@ async function main(argv) {
   if (cmd === "state") { log(JSON.stringify(await currentState(), null, 2)); return 0; }
   if (cmd === "apply-preset") {
     var p = argv[1] ? await preset(argv[1]) : null;
-    if (!p) { logErr("unknown preset"); return 2; }
+    if (!p) return usageError("unknown preset '" + (argv[1] || "") + "' (presets live in " + presetsDir() + ")");
     await applyPreset(p);
     return 0;
   }
   if (cmd === "engine") {
+    if (argv[1] !== "on" && argv[1] !== "off") return usageError("engine takes 'on' or 'off', not '" + (argv[1] || "") + "'");
     var on = argv[1] === "on";
     await setEngine(on);
     log("engine " + (on ? "on" : "off"));
     return 0;
   }
   if (cmd === "engine-is-on") { var s = await settings(); return s.enabled ? 0 : 1; }
-  if (cmd === "hold") {
-    await setHold(argv[1] || null);
+  if (cmd === "hold" || cmd === "automatic") {
+    var want = cmd === "automatic" ? "automatic" : argv[1];
+    if (!want) return usageError("hold takes a preset name or 'automatic'");
+    if (want.toLowerCase() !== "automatic" && !(await preset(want))) return usageError("unknown preset '" + want + "' (presets live in " + presetsDir() + ")");
+    await setHold(want);
     var s2 = await settings();
     log("hold: " + (s2.hold || "Automatic"));
     return 0;
@@ -2601,6 +2679,8 @@ async function main(argv) {
   if (cmd === "generate") {
     var pr = flagValue(argv, "--prompt");
     var at = flagValue(argv, "--apply-at");
+    if (pr && !(await promptExists(pr))) return usageError("unknown prompt '" + pr + "' ('cycle prompts' lists them)");
+    if (at && !parseIso(at)) return usageError("--apply-at takes a time like 2026-10-15T14:00:00");
     return generateAt(hasFlag(argv, "--scheduled"), pr, at ? parseIso(at) : null);
   }
   if (cmd === "prompts") {
@@ -2616,6 +2696,7 @@ async function main(argv) {
   }
   if (cmd === "open") {
     var id = flagValue(argv, "--prompt");
+    if (id && !(await promptExists(id))) return usageError("unknown prompt '" + id + "' ('cycle prompts' lists them)");
     if (id) await host.writeFile(join(stateDir(), "open-prompt"), id);
     var r2 = await shv(["omarchy-shell", "shell", "summon", "emrgim.cycle"], 20);
     return r2.code === 0 ? 0 : r2.code || 1;
@@ -2623,18 +2704,26 @@ async function main(argv) {
   if (cmd === "expand") {
     var s5 = await settings();
     var text = argv.slice(1).join(" ");
+    if (!text.trim()) return usageError("expand takes the text to resolve");
     var errs = promptErrors(text, s5.images ? s5.images.length : 0);
     for (var e = 0; e < errs.length; e++) logErr("error: " + errs[e]);
     log(await expandPlaceholders(text, s5));
     return 0;
   }
-  if (cmd === "reset-profile") { await resetProfile(argv[1] || null); return 0; }
+  if (cmd === "reset-profile") {
+    if (argv[1] && !isPhase(argv[1])) return usageError("unknown slot '" + argv[1] + "' (" + PHASES.join(", ") + ")");
+    await resetProfile(argv[1] || null);
+    return 0;
+  }
   if (cmd === "profile") { log((await readText(profilePath())) || "{}"); return 0; }
   if (cmd === "brightness-step") {
     var slot = flagValue(argv, "--slot") || "morning";
     var base = parseInt(flagValue(argv, "--base") || "70", 10);
     var at2 = flagValue(argv, "--at");
-    log(await brightnessStep(slot, isNaN(base) ? 70 : base, at2 ? parseIso(at2) : nowDt()));
+    if (!isPhase(slot)) return usageError("unknown slot '" + slot + "' (" + PHASES.join(", ") + ")");
+    if (!isIntBetween(base, 1, 100)) return usageError("--base takes a brightness from 1 to 100");
+    if (at2 && !parseIso(at2)) return usageError("--at takes a time like 2026-10-15T14:00:00");
+    log(await brightnessStep(slot, base, at2 ? parseIso(at2) : nowDt()));
     return 0;
   }
   if (cmd === "schedules") { log(JSON.stringify(await statusAll(), null, 2)); return 0; }
@@ -2645,6 +2734,5 @@ async function main(argv) {
     log(await buildPrompt(s6, live, (await headline(s6, false)).headline));
     return 0;
   }
-  logErr(USAGE);
-  return 2;
+  return usageError("unknown command '" + cmd + "'");
 }

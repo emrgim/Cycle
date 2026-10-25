@@ -10,7 +10,7 @@ BarWidget {
 
   EngineHost {
     id: engineHost
-    onMinute: function() { Cycle.tick(false) }
+    onMinute: function() { Cycle.tick(false).then(null, function(e) { console.log("cycle: tick failed: " + (e && e.message ? e.message : e)) }) }
   }
 
   Component.onCompleted: Cycle.arm(engineHost.api)

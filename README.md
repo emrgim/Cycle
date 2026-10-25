@@ -82,8 +82,9 @@ cycle live | prompt | expand TEXT print live data | the prompt | a resolved text
 cycle theme-gen [--force] [--apply] | test-gen
 cycle profile | reset-profile [SLOT]
 cycle brightness-step --slot S --base N [--at ISO]
+cycle help                        the command list
 ```
-Unknown commands exit 2. `cycle engine-is-on` exits 0 when Automatic Cycle is on and 1 when it is off.
+Exit codes: 0 ok, 1 failed, 2 bad command or name, 3 another generation is already running. A preset, prompt or slot that does not exist is refused with a message instead of acted on: `cycle hold typo` pins nothing and `cycle engine maybe` changes nothing. `cycle engine-is-on` exits 0 when Automatic Cycle is on and 1 when it is off.
 
 ## Screenshots
 These captures are the previous desktop window, taken on SuperOmi. The shell window has the same five tabs.
@@ -114,6 +115,7 @@ Automatic mode and fixed presets (theme, wallpaper, brightness, warmth) that you
   - **Right click** applies the current slot immediately.
 - A kept-loaded service runs the same minute timer, so scheduled prompts still fire when the window is closed.
 - `cycle tick`, `cycle state`, `cycle profile`, and `cycle apply-now` print JSON or a short status line, so a local agent can read state or trigger a step.
+- In the window, **Generate**, **Apply now**, **Refresh**, **Detect location**, **Try** and **Test generation** run one at a time: the status line counts the seconds, a failure is shown in red with its reason, and a finished generation says whether the wallpaper was applied. **Delete** needs a second press within 5 s. Number fields take only numbers in range (window hours 0–23, brightness 1–100, warmth 1000–10000 K), feed addresses must start with `https://`, and a prompt save that fails leaves the old prompt in place.
 - Changing prompts rewrites the Cycle rows in `~/.config/omarchy/extensions/omarchy-menu.jsonc` between the generated markers.
 
 ## How it works
@@ -129,7 +131,7 @@ Enabling the plugin **generates nothing until you configure it**.
 
 - **Automatic Cycle is off.** Turn it on in the **Now** tab or with `cycle engine on`. The minute timer keeps running either way so a prompt schedule can still fire; the display engine itself does nothing until it is on, unless you pass `--force` or press Apply now.
 - **The styles folder is empty.** `~/.config/omarchy/cycle/styles` has no prompt files until you create one.
-- **Location is detected once** on that first start, from a privacy-respecting HTTPS IP geolocation lookup (city, coordinates, timezone), then stored. A location you save yourself is never replaced on restart, when the network changes, or when Cycle is updated. If the lookup fails and nothing was saved, Settings says **location unknown, set it in Settings**.
+- **Location is detected once** on that first start, from a privacy-respecting HTTPS IP geolocation lookup (city, coordinates, timezone), then stored. A location you save yourself is never replaced on restart, when the network changes, or when Cycle is updated. Saving coordinates more than about 1 km from the previous ones clears the stored timezone, and Open-Meteo derives it from the new coordinates. If the lookup fails and nothing was saved, Settings says **location unknown, set it in Settings**.
 - **Generation window** defaults to **06:00–18:00**.
 - **Default RSS feed:** Google News in English until a city is detected; the first successful detection points the feed at that city. **Open-Meteo** needs no API key.
 - **The image provider is Grok.** Switch to Claude, Codex, Gemini, Copilot or a custom command on **Settings → Generation**.
@@ -138,7 +140,7 @@ Enabling the plugin **generates nothing until you configure it**.
 Brightness slots, sun-based phases, Open-Meteo data and the override/learning loop still work without image generation.
 
 ## Prompts
-Prompts are text files `~/.config/omarchy/cycle/styles/<id>.txt` (titles in `settings.prompt_titles`, the active one in `styles/active`).
+Prompts are text files `~/.config/omarchy/cycle/styles/<id>.txt` (titles in `settings.prompt_titles`, the active one in `styles/active`). An id is a file name inside that folder: it cannot contain `/`, start with a dot, or be `__proto__`, `constructor` or `prototype`; the window turns other characters into `-`. Preset and cycle ids follow the same rule, and a name that breaks it is refused everywhere, including on the command line.
 Each prompt has a title, id, editor, slash suggestions, error lines, a live preview, and Use / Generate / Duplicate / Delete. Saving one schedule turns the others off.
 
 ### Composition language
@@ -254,7 +256,7 @@ Sample for 15 Oct 2026 at 25.2048°N, 55.2708°E, timezone offset +4: civil dawn
 
 ## Brightness override and learning
 - **Override:** every tick compares the backlight with the value Cycle last set. A difference of more than 2 points is a manual change. Cycle keeps it until the next slot. Further changes in the same slot update the override.
-- **Log:** each override is appended to `~/.local/state/cycle/overrides.json` (`at`, `slot`, `base`, `user`).
+- **Log:** each override is appended to `~/.local/state/cycle/overrides.json` (`at`, `slot`, `base`, `user`). The log keeps the last 1000 overrides.
 - **Learning:** 3 or more same-direction overrides on different days, using the last override of each day within the last 7 days, set the slot's learned base to their median. Cycle moves toward it by at most 5 points per day. An even count rounds halves away from zero for the median of positive values (standard half-up).
 - Commands: `cycle profile`, `cycle reset-profile [SLOT]` (the override log is kept), `cycle brightness-step --slot S --base N [--at YYYY-MM-DDTHH:MM:SS]`. `CYCLE_STATE_DIR` and `CYCLE_BRIGHTNESS_FILE` redirect state and the brightness file.
 
@@ -299,6 +301,7 @@ Also remove leftover `cycle.*` rows from `omarchy-menu.jsonc` if they remain. Sw
 - **Learning went the wrong way.** `cycle reset-profile [SLOT]` clears learned values. The override log stays.
 - **Weather data.** Open-Meteo needs no key. Image generation uses only the command you configured.
 - **Optional display helper.** Without `omarchy-display`, dark/light, preset brightness, warmth, and night shift are skipped. Theme, wallpaper, and `brightnessctl` still run.
+- **`write failed: …` in the shell log.** Cycle could not write that file: check free space and the permissions of `~/.config/omarchy/cycle` and `~/.local/state/cycle`. A settings write that fails stops the action that needed it, and the window shows the reason in red.
 
 ## Testing
 ```text
@@ -307,6 +310,7 @@ node test/date-bounds.test.mjs
 node test/png-bounds.test.mjs
 node test/qml-plaintext.test.mjs
 node test/providers.test.mjs
+node test/safety.test.mjs
 ```
 The engine checks cover the prompt language, the sun sample, generator placeholder isolation (including a headline that must not become shell syntax), brightness override logging, a fresh settings seed, first-run geolocation (including a failed lookup), and PNG palette extraction.
 
@@ -315,6 +319,8 @@ The engine checks cover the prompt language, the sun sample, generator placehold
 `node test/png-bounds.test.mjs` checks that a truncated IDAT, a deflate bomb, and oversized dimensions are rejected, and that a valid wallpaper still produces the same palette.
 
 `node test/providers.test.mjs` checks provider selection (including settings saved before providers existed), the exact argument list each default command passes to `claude`, `codex`, `gemini` and `copilot`, that Gemini does not start without its policy file, SVG extraction from plain, fenced and JSON replies, that SVGs pointing outside themselves are never rendered, and that a failed render leaves no file. It uses stand-in agent and `rsvg-convert` programs, and also renders a real 3840×2160 PNG when `rsvg-convert` is installed.
+
+`node test/safety.test.mjs` checks that a prompt, preset or cycle name cannot leave its folder or be a built-in property, that a settings file cannot change the settings object itself, that a generated file stays in the generated folder, that the override log stays at 1000 entries, that a failed write is reported and changes nothing, that a second generation reports itself as skipped, and that the command line refuses unknown presets, prompts, slots and values with exit code 2.
 
 `node test/fetch-bounds.test.mjs` checks that fetches are HTTPS and that the only `XMLHttpRequest` goes through the capped helper.
 
