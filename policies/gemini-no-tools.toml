@@ -1,0 +1,8 @@
+# Cycle passes this file to Gemini CLI with --admin-policy when it asks for a
+# wallpaper. Every tool, built-in or MCP, is denied, which also hides it from the
+# model: Gemini can only reply with text. Admin rules override user rules.
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 999
+denyMessage = "Cycle runs Gemini without tools."
